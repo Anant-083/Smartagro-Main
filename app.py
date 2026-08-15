@@ -44,6 +44,33 @@ load_dotenv(os.path.join(basedir, '.env'))
 
 app = Flask(__name__)
 
+# ── Gzip/Brotli-compress every response (HTML/JS/CSS/JSON) ─────────────────
+# translations.js alone is ~177KB uncompressed; gzip typically cuts JS/JSON
+# text payloads by 70-80%. This is the single biggest lever for "everything
+# is slow to fetch" on mobile/rural connections, and costs almost nothing
+# in CPU. Falls back gracefully if the package isn't installed yet.
+try:
+    from flask_compress import Compress
+    app.config["COMPRESS_ALGORITHM"] = ["br", "gzip"]
+    app.config["COMPRESS_MIMETYPES"] = [
+        "text/html", "text/css", "text/xml", "application/json",
+        "application/javascript", "text/javascript",
+    ]
+    Compress(app)
+except ImportError:
+    print("[AgroSmart] flask-compress not installed — responses will NOT be gzipped. "
+          "Run: pip install flask-compress")
+
+# ── Long-lived caching for static assets ────────────────────────────────────
+# Flask's default static handler doesn't set a real Cache-Control header, so
+# every page navigation (dashboard -> market -> alerts) re-downloads the same
+# 330KB+ of JS from scratch. This lets the browser cache it for a week.
+@app.after_request
+def _add_static_cache_headers(response):
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+    return response
+
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 GROQ_API_KEY        = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY       = os.getenv("GEMINI_API_KEY", "")
@@ -919,6 +946,7 @@ def fetch_agmarknet_prices(state: str) -> list:
         with _agmark_history_lock:
             cache = _load_history_cache()
             state_hist = cache.setdefault(state, {})
+            cache_changed = False  # only rewrite the file if something is actually new
 
             for display_name, rec in latest_by_commodity.items():
                 hist = state_hist.setdefault(display_name, [])
@@ -932,7 +960,11 @@ def fetch_agmarknet_prices(state: str) -> list:
                     if d not in existing_dates:
                         hist.append({"date": d, "price": price})
                         existing_dates.add(d)
+                        cache_changed = True
                 hist.sort(key=lambda h: h["date"])
+                new_len = min(len(hist), 30)
+                if new_len != len(hist):
+                    cache_changed = True
                 hist[:] = hist[-30:]  # keep the last 30 real daily points
 
                 if len(hist) < 2:
@@ -956,7 +988,11 @@ def fetch_agmarknet_prices(state: str) -> list:
                     "district":     rec["district"],
                     "arrival_date": rec["arrival_date"],
                 })
-            _save_history_cache(cache)
+            # Cache hits (which are the common case within the 1-hour TTL)
+            # now skip this write entirely instead of rewriting the whole
+            # 50KB+ file on every single request that touches this lock.
+            if cache_changed:
+                _save_history_cache(cache)
     except Exception as e:
         # Never let a disk/cache problem take down live pricing — just skip
         # persistence for this call and still return what we parsed, using
@@ -1843,7 +1879,15 @@ TRANSLATE_MODELS = [
 TRANSLATE_CHUNK_SIZE = 40   
 TRANSLATE_MAX_WORKERS = 4  
 TRANSLATE_STAGGER_SEC = 0.15 
-MIN_CALL_INTERVAL_SEC = 1.5
+# NOTE: this used to be 1.5s. With 4 worker threads all calling the SAME
+# model, a 1.5s minimum gap between calls forces them back into near-serial
+# execution (4 chunks x 1.5s = 6s+ of pure throttling before any actual
+# network time), even though the ThreadPoolExecutor above looks parallel.
+# Groq's actual per-model rate limit is well above 1 req/0.4s for these
+# model tiers, and _post_to_groq() already retries with backoff on a real
+# HTTP 429 — so this only needs to prevent accidental bursts, not add a
+# blanket 1.5s tax to every translated page load.
+MIN_CALL_INTERVAL_SEC = 0.4
 
 _model_last_call = {}
 _model_throttle_lock = threading.Lock()
