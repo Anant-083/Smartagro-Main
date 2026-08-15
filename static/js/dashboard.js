@@ -169,7 +169,7 @@ async function applyDashboardLanguage(langCode) {
             window._dashTrans = {};
             window._dashTransLang = null;
         }
-        (err){
+        } catch (err) {
         console.warn('[DashTranslate] error:', err);
         window._dashTrans = {};
     } finally {
