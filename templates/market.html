@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SmartAgro – Market Prices</title>
+  <link rel="stylesheet" href="/static/css/main.css"/>
+  <link rel="stylesheet" href="/static/css/market.css"/>
+  <link href="https://fonts.googleapis.com/css2=family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json"/>
+  <meta name="theme-color" content="#4ade80"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="SmartAgro"/>
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png"/>
+</head>
+<body>
+
+<!-- ═══════════════════════ NAVBAR ═══════════════════════ -->
+<nav class="navbar" id="navbar">
+  <div class="nav-brand">
+    <div class="brand-icon"><i class="fas fa-seedling"></i></div>
+    <span class="brand-text">Smart<span class="brand-accent">Agro</span></span>
+  </div>
+  <div class="nav-links" id="navLinks">
+    <a href="/" class="nav-item" data-translate="nav_dashboard"><i class="fas fa-th-large"></i><span>Dashboard</span></a>
+    <a href="/diagnose" class="nav-item" data-translate="nav_diagnose"><i class="fas fa-microscope"></i><span>Diagnose Crop</span></a>
+    <a href="/market" class="nav-item active" data-translate="nav_market"><i class="fas fa-chart-line"></i><span>Market Prices</span></a>
+    <a href="/alerts" class="nav-item" data-translate="nav_alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+  </div>
+  <div class="nav-actions">
+    <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme">
+    <i class="fas fa-moon" id="themeIcon"></i>
+    </button>
+    <div class="lang-selector" id="langSelector">
+      <button class="lang-btn" id="langBtn">
+        <i class="fas fa-globe"></i><span id="currentLang">EN</span><i class="fas fa-chevron-down"></i>
+      </button>
+      <div class="lang-dropdown" id="langDropdown">
+        <div class="lang-search"><input type="text" placeholder="Search language..." id="langSearch"/></div>
+        <div class="lang-list" id="langList"></div>
+      </div>
+    </div>
+    <button class="install-btn" id="installBtn" title="Install SmartAgro App">
+      <i class="fas fa-download"></i><span>Install App</span>
+    </button>
+    <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════ PAGE HERO ═══════════════════════ -->
+<section class="page-hero market-hero">
+  <div class="hero-bg">
+    <div class="hero-orb orb-1"></div>
+    <div class="hero-orb orb-2"></div>
+    <div class="hero-orb orb-3"></div>
+  </div>
+  <div class="page-hero-content">
+    <div class="hero-badge"><i class="fas fa-chart-line"></i> Live Mandi Intelligence</div>
+    <h1><span class="gradient-text">Crop Market Prices</span></h1>
+    <p data-translate="market_subtitle">Real-time mandi prices across 10+ Indian cities — updated daily</p>
+  </div>
+  <!-- Live ticker -->
+  <div class="price-ticker">
+    <div class="ticker-label"><i class="fas fa-satellite-dish"></i> LIVE</div>
+    <div class="ticker-track" id="tickerTrack">
+      <div class="ticker-content" id="tickerContent">Loading market data...</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ SEARCH + FILTER BAR ═══════════════════════ -->
+<section class="search-bar-section">
+  <div class="container">
+    <div class="search-filter-bar">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <!-- Fixed: Synced id to match market.js search queries -->
+        <input type="text" id="locationSearch" placeholder="Search city (e.g. Delhi, Mumbai, Kolkata...)"/>
+        <button class="search-btn" onclick="searchLocation()" data-translate="btn_search">Search</button>
+        <button class="clear-btn" id="clearSearchBtn" onclick="clearSearch()" style="display:none">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="filter-chips" id="filterChips">
+      <button class="chip active" onclick="filterDemand('all', this)" data-translate="filter_all">All</button>
+      <button class="chip chip-high" onclick="filterDemand('Very High', this)" data-translate="filter_very_high">Very High Demand</button>
+      <button class="chip chip-rising" onclick="filterDemand('rising', this)" data-translate="filter_rising">Price Rising</button>
+      <button class="chip chip-falling" onclick="filterDemand('falling', this)" data-translate="filter_falling">Price Falling</button>
+    </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ LEGEND ═══════════════════════ -->
+<section class="legend-section">
+  <div class="container">
+    <div class="legend-bar">
+      <div class="legend-item">
+        <span class="legend-dot dot-very-high"></span>
+        <span data-translate="legend_very_high">Very High Demand</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot dot-high"></span>
+        <span data-translate="legend_high">High Demand</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot dot-medium"></span>
+        <span data-translate="legend_medium">Medium Demand</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot dot-low"></span>
+        <span data-translate="legend_low">Low Demand</span>
+      </div>
+      <div class="legend-divider"></div>
+      <div class="legend-item">
+        <span class="legend-arrow arrow-up"><i class="fas fa-arrow-trend-up"></i></span>
+        <span data-translate="legend_rising">Price Rising</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-arrow arrow-down"><i class="fas fa-arrow-trend-down"></i></span>
+        <span data-translate="legend_falling">Price Falling</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ MARKET DATA GRID ═══════════════════════ -->
+<section class="section market-data-section">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag"><i class="fas fa-store"></i></div>
+      <h2 data-translate="market_data_title">Mandi Prices by City</h2>
+      <p id="marketSubtitle" data-translate="market_data_sub">Showing all major Indian markets</p>
+
+      <!-- Quick Jump Buttons -->
+      <div class="market-quick-jumps">
+        <button class="quick-jump-btn" onclick="scrollToMarketSection('chartSection')">
+          <i class="fas fa-chart-line"></i> <span data-translate="btn_price_graph">Price Graph</span>
+        </button>
+        <button class="quick-jump-btn" onclick="scrollToMarketSection('tableSection')">
+          <i class="fas fa-table"></i> <span data-translate="btn_comparison_table">Comparison Table</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div class="market-loading" id="marketLoading">
+      <div class="loading-spinner"></div>
+      <p data-translate="loading_market">Fetching latest mandi prices...</p>
+    </div>
+
+    <!-- Market Cards Grid -->
+    <div class="market-cities-grid" id="marketCitiesGrid"></div>
+
+    <!-- No Results -->
+    <div class="no-results" id="noResults" style="display:none">
+      <i class="fas fa-store-slash"></i>
+      <h3 data-translate="no_results_title">No markets found</h3>
+      <p data-translate="no_results_sub">Try searching for Delhi, Mumbai, Kolkata, Chennai, Hyderabad...</p>
+      <button class="btn-secondary" id="showAllMarketsBtn" data-translate="btn_show_all">Show All Markets</button>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ MARKET ANALYSIS CHART ═══════════════════════ -->
+<section class="section chart-section" id="chartSection">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag"><i class="fas fa-chart-area"></i></div>
+      <h2 data-translate="chart_title">Price Trend Analysis</h2>
+      <p data-translate="chart_sub">30-day price movement for top crops</p>
+    </div>
+    <div class="chart-wrapper">
+      <div class="chart-controls">
+        <div class="chart-tabs">
+          <button class="chart-tab active" onclick="switchChart('line')" data-translate="tab_trend">Trend</button>
+          <button class="chart-tab" onclick="switchChart('bar')" data-translate="tab_comparison">Comparison</button>
+          <button class="chart-tab" onclick="switchChart('radar')" data-translate="tab_demand">Demand Map</button>
+        </div>
+        <div class="chart-city-select" style="display:flex;gap:8px;align-items:center;">
+          <select id="chartCropScope" onchange="updateChart()" title="Trend Crop Selection">
+            <option value="top">Top Major Crops</option>
+            <option value="all">All Commodities</option>
+          </select>
+          <select id="chartCitySelect" onchange="updateChart()">
+  <option value="Delhi">Delhi</option>
+  <option value="Mumbai">Mumbai</option>
+  <option value="Kolkata">Kolkata</option>
+  <option value="Chennai">Chennai</option>
+  <option value="Hyderabad">Hyderabad</option>
+  <option value="Pune">Pune</option>
+  <option value="Ahmedabad">Ahmedabad</option>
+  <option value="Lucknow">Lucknow</option>
+  <option value="Jaipur">Jaipur</option>
+  <option value="Bhopal">Bhopal</option>
+  <option value="Patna">Patna</option>
+  <option value="Nagpur">Nagpur</option>
+  <option value="Indore">Indore</option>
+  <option value="Surat">Surat</option>
+  <option value="Kanpur">Kanpur</option>
+  <option value="Coimbatore">Coimbatore</option>
+  <option value="Visakhapatnam">Visakhapatnam</option>
+  <option value="Bhubaneswar">Bhubaneswar</option>
+  <option value="Guwahati">Guwahati</option>
+  <option value="Amritsar">Amritsar</option>
+</select>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap">
+        <div class="chart-inner-wrap" id="chartInnerWrap">
+          <canvas id="marketChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ TOP CROPS TABLE ═══════════════════════ -->
+<section class="section table-section" id="tableSection">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag"><i class="fas fa-table"></i></div>
+      <h2 data-translate="table_title">Detailed Price Comparison</h2>
+      <p data-translate="table_sub">Prices across all major cities (₹/quintal)</p>
+    </div>
+    <div class="table-wrapper">
+      <table class="price-table" id="priceTable">
+        <thead>
+          <tr>
+            <th data-translate="th_crop">Crop</th>
+            <th>Delhi</th>
+            <th>Mumbai</th>
+            <th>Kolkata</th>
+            <th>Chennai</th>
+            <th>Hyderabad</th>
+            <th>Pune</th>
+            <th>Ahmedabad</th>
+            <th>Lucknow</th>
+            <th>Jaipur</th>
+            <th>Bhopal</th>
+          </tr>
+        </thead>
+        <tbody id="priceTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ FOOTER ═══════════════════════ -->
+<footer class="footer">
+  <div class="disclaimer-container">
+    <p><small><strong>⚠️ Disclaimer:</strong> SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.</small></p>
+  </div>
+  <div class="container">
+    <div class="footer-brand">
+      <div class="brand-icon small"><i class="fas fa-seedling"></i></div>
+      <span>Smart<span class="brand-accent">Agro</span></span>
+    </div>
+    <p data-translate="footer_text">Empowering farmers with AI-driven precision agriculture</p>
+    <p class="footer-copy">© 2026 SmartAgro. Built for India's farmers.</p>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+<nav id="mobileBottomNav">
+  <a href="/"><i class="fas fa-home"></i><span>Home</span></a>
+  <a href="/diagnose"><i class="fas fa-microscope"></i><span>Diagnose</span></a>
+  <a href="/market" class="active"><i class="fas fa-chart-line"></i><span>Mandi Prices</span></a>
+  <a href="/alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+</nav>
+
+<script src="/static/js/translations.js"></script>
+<script src="{{ url_for('static', filename='js/market_translate.js') }}"></script>
+<script src="/static/js/main.js"></script>
+<script src="/static/js/market.js"></script>
+<script src="/static/js/kisan-helper.js"></script>
+</body>
+</html>

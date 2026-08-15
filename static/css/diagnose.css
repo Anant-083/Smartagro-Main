@@ -1,0 +1,566 @@
+/* ── Page hero ──────────────────────── */
+.diagnose-hero {
+  background: linear-gradient(160deg, #050d06, #0a1a0c, #06100a);
+  min-height: 280px;
+}
+.diagnose-hero .orb-1 { background: radial-gradient(circle, var(--teal), transparent); }
+.diagnose-hero .orb-2 { background: radial-gradient(circle, var(--green-2), transparent); }
+
+/* ── Section wrapper ────────────────── */
+.diagnose-section { background: var(--bg); padding: 60px 0 80px; }
+
+/* ══════════════════════════════════════
+   MAIN LAYOUT — two columns
+══════════════════════════════════════ */
+.diagnose-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 460px) 1fr;  
+  gap: 32px;
+  align-items: start;
+}
+
+/* ── LEFT: Upload panel ─────────────── */
+.upload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Upload Zone */
+.upload-zone {
+  border: 2px dashed rgba(74,222,128,0.35);
+  border-radius: var(--radius-lg);
+  padding: 44px 28px;
+  text-align: center;
+  background: var(--card);
+  cursor: pointer;
+  transition: var(--trans);
+}
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: var(--green);
+  background: rgba(74,222,128,0.04);
+  box-shadow: 0 0 24px rgba(74,222,128,0.12);
+}
+.upload-icon {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.25);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem;
+  color: var(--green);
+  margin: 0 auto 16px;
+  transition: var(--trans);
+}
+.upload-zone:hover .upload-icon {
+  transform: scale(1.08);
+  box-shadow: 0 0 24px rgba(74,222,128,0.3);
+}
+.upload-zone h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.upload-zone p {
+  font-size: 0.8rem;
+  color: var(--text-3);
+  margin-bottom: 22px;
+}
+.upload-btns {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.upload-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Image preview */
+.image-preview {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid rgba(74,222,128,0.3);
+  background: #000;
+  animation: fadeInUp 0.3s ease;
+}
+.image-preview img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  display: block;
+}
+.preview-overlay {
+  position: absolute;
+  top: 10px; right: 10px;
+}
+.preview-label {
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--bg-3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(10,15,10,0.82);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem;
+  transition: var(--trans);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+.btn-icon:hover { background: var(--red-2); color: #fff; border-color: transparent; }
+
+/* Camera */
+.camera-modal {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-2);
+  background: #000;
+  animation: fadeInUp 0.3s ease;
+}
+.camera-wrapper { position: relative; }
+#cameraFeed { width: 100%; display: block; max-height: 280px; object-fit: cover; }
+.camera-controls {
+  position: absolute;
+  bottom: 14px; left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+}
+.close-cam-btn { background: rgba(10,15,10,0.8) !important; }
+.btn-capture {
+  width: 62px; height: 62px;
+  border-radius: 50%;
+  background: #fff;
+  color: #000;
+  font-size: 1.3rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--trans);
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.25);
+  cursor: pointer;
+  border: none;
+}
+.btn-capture:hover { transform: scale(1.08); }
+
+/* Analyze button */
+.btn-analyze {
+  width: 100%;
+  padding: 15px;
+  background: linear-gradient(135deg, #166534, #22c55e, #4ade80);
+  color: #000;
+  font-weight: 800;
+  font-size: 1rem;
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px;
+  transition: var(--trans);
+  position: relative;
+  overflow: hidden;
+  font-family: 'Syne', sans-serif;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  animation: fadeInUp 0.3s ease;
+}
+.btn-analyze:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(74,222,128,0.4);
+}
+.btn-analyze:active { transform: translateY(0); }
+.btn-analyze:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-shine {
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
+  transform: skewX(-20deg);
+  animation: shine 2.5s infinite;
+}
+@keyframes shine {
+  0%      { left: -100%; }
+  60%,100%{ left: 140%;  }
+}
+
+/* Tips card */
+.tips-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tips-header {
+  padding: 12px 16px;
+  background: rgba(251,191,36,0.06);
+  border-bottom: 1px solid rgba(251,191,36,0.15);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--amber);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.tips-list {
+  list-style: none;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.tips-list li {
+  font-size: 0.78rem;
+  color: var(--text-2);
+  padding-left: 14px;
+  position: relative;
+}
+.tips-list li::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: var(--green);
+  font-size: 0.75rem;
+}
+
+/* ── RIGHT: Results panel ───────────── */
+.results-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  min-height: 520px;
+  overflow: hidden;
+}
+
+/* Placeholder */
+.results-placeholder {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 40px 32px;
+}
+.placeholder-icon {
+  width: 84px; height: 84px;
+  border-radius: 50%;
+  background: rgba(74,222,128,0.07);
+  border: 1px solid rgba(74,222,128,0.18);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.2rem;
+  color: var(--green);
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.results-placeholder h3 {
+  font-size: 1.05rem;
+  color: var(--text-2);
+  font-weight: 700;
+}
+.results-placeholder p {
+  font-size: 0.82rem;
+  color: var(--text-3);
+  max-width: 320px;
+}
+.placeholder-steps {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 280px;
+}
+.ps-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--text-2);
+  padding: 8px 14px;
+  background: var(--bg-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.ps-num {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--green-glow);
+  border: 1px solid rgba(74,222,128,0.3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--green);
+  flex-shrink: 0;
+}
+
+/* Analyzing loader */
+.analyzing-loader {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px;
+  text-align: center;
+}
+.ai-loading-ring {
+  width: 72px; height: 72px;
+  border: 3px solid var(--border);
+  border-top: 3px solid var(--green);
+  border-right: 3px solid var(--teal);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+/* ── Results content ────────────────── */
+.results-content { animation: fadeInUp 0.4s ease; }
+
+.result-header {
+  padding: 22px 24px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+}
+.result-disease-name {
+  font-size: 1.3rem;
+  font-weight: 800;
+  font-family: 'Syne', sans-serif;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+.result-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.result-badge {
+  padding: 3px 11px;
+  border-radius: 50px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.badge-confidence {
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.25);
+  color: var(--green);
+}
+.badge-severity-severe {
+  background: rgba(248,113,113,0.1);
+  border: 1px solid rgba(248,113,113,0.25);
+  color: var(--red);
+}
+.badge-severity-moderate {
+  background: rgba(251,191,36,0.1);
+  border: 1px solid rgba(251,191,36,0.25);
+  color: var(--amber);
+}
+.badge-severity-mild {
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.25);
+  color: var(--green);
+}
+
+.result-body {
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.result-section h4 {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.result-section h4 i { color: var(--green); }
+
+.result-cause {
+  font-size: 0.85rem;
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--amber);
+  line-height: 1.6;
+}
+.result-timeline {
+  font-size: 0.875rem;
+  color: var(--teal);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Eco remedies */
+.eco-remedies { display: flex; flex-direction: column; gap: 10px; }
+.eco-remedy-card {
+  background: rgba(74,222,128,0.04);
+  border: 1px solid rgba(74,222,128,0.14);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.eco-remedy-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--green);
+  margin-bottom: 5px;
+}
+.eco-remedy-method {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  margin-bottom: 3px;
+}
+.eco-remedy-freq { font-size: 0.75rem; color: var(--text-3); }
+.eco-effectiveness {
+  margin-top: 8px;
+  height: 4px;
+  background: var(--bg-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.eco-effectiveness-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green-dark), var(--green));
+  border-radius: 2px;
+  transition: width 1.1s ease;
+}
+
+/* Chemical remedies */
+.chemical-remedies { display: flex; flex-direction: column; gap: 8px; }
+.chem-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--bg-3);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+.chem-name { font-weight: 600; color: var(--text); flex: 1; min-width: 120px; }
+.chem-dose { color: var(--amber); font-weight: 700; white-space: nowrap; }
+
+/* Prevention */
+.prevention-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.prevention-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.prevention-list li::before {
+  content: '✓';
+  color: var(--green);
+  font-weight: 800;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Remedy chart */
+.remedy-chart-wrap {
+  height: 180px;
+  position: relative;
+}
+
+/* ── How It Works steps ─────────────── */
+.how-section { background: var(--bg-2); }
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.step-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px 24px;
+  text-align: center;
+  position: relative;
+  transition: var(--trans);
+}
+.step-card:hover {
+  border-color: var(--green);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow);
+}
+.step-num {
+  font-family: 'Syne', sans-serif;
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: rgba(74,222,128,0.07);
+  position: absolute;
+  top: 14px; right: 18px;
+  line-height: 1;
+  pointer-events: none;
+}
+.step-icon {
+  width: 58px; height: 58px;
+  border-radius: 50%;
+  background: rgba(74,222,128,0.08);
+  border: 1px solid rgba(74,222,128,0.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem;
+  color: var(--green);
+  margin: 0 auto 14px;
+  transition: var(--trans);
+}
+.step-card:hover .step-icon {
+  background: rgba(74,222,128,0.15);
+  box-shadow: 0 0 18px rgba(74,222,128,0.2);
+}
+.step-card h4 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+.step-card p  { font-size: 0.82rem; color: var(--text-2); line-height: 1.6; }
+
+/* ── Responsive ─────────────────────── */
+@media (max-width: 1024px) {
+  .diagnose-layout { grid-template-columns: 1fr; }
+  .results-panel { min-height: 400px; }
+  .results-placeholder { min-height: 400px; }
+  .steps-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 600px) {
+  .steps-grid { grid-template-columns: 1fr; }
+  .upload-zone { padding: 28px 16px; }
+  .upload-zone h3 { font-size: 0.95rem; }
+  .upload-btns { flex-direction: column; align-items: stretch; }
+  .upload-btns .btn-primary,
+  .upload-btns .btn-secondary { justify-content: center; }
+  .result-body { padding: 14px; }
+  .result-header { padding: 14px; }
+  .result-disease-name { font-size: 1.1rem; }
+  .btn-analyze { font-size: 0.9rem; padding: 13px; }
+  .camera-controls { gap: 14px; }
+  .btn-capture { width: 54px; height: 54px; }
+  .chem-item { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .tips-card { font-size: 0.82rem; }
+  .diagnose-hero { min-height: 220px; }

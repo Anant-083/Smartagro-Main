@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SmartAgro – Diagnose Crop</title>
+  <link rel="stylesheet" href="/static/css/main.css"/>
+  <link rel="stylesheet" href="/static/css/diagnose.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json"/>
+  <meta name="theme-color" content="#4ade80"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="SmartAgro"/>
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png"/>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar" id="navbar">
+  <div class="nav-brand">
+    <div class="brand-icon"><i class="fas fa-seedling"></i></div>
+    <span class="brand-text">Smart<span class="brand-accent">Agro</span></span>
+  </div>
+  <div class="nav-links" id="navLinks">
+    <a href="/" class="nav-item" data-translate="nav_dashboard"><i class="fas fa-th-large"></i><span>Dashboard</span></a>
+    <a href="/diagnose" class="nav-item active" data-translate="nav_diagnose"><i class="fas fa-microscope"></i><span>Diagnose Crop</span></a>
+    <a href="/market" class="nav-item" data-translate="nav_market"><i class="fas fa-chart-line"></i><span>Market Prices</span></a>
+    <a href="/alerts" class="nav-item" data-translate="nav_alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+  </div>
+  <div class="nav-actions">
+    <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme">
+    <i class="fas fa-moon" id="themeIcon"></i>
+    </button>
+    <div class="lang-selector" id="langSelector">
+      <button class="lang-btn" id="langBtn"><i class="fas fa-globe"></i><span id="currentLang">EN</span><i class="fas fa-chevron-down"></i></button>
+      <div class="lang-dropdown" id="langDropdown">
+        <div class="lang-search"><input type="text" placeholder="Search language..." id="langSearch"/></div>
+        <div class="lang-list" id="langList"></div>
+      </div>
+    </div>
+    <button class="install-btn" id="installBtn" title="Install SmartAgro App">
+      <i class="fas fa-download"></i><span>Install App</span>
+    </button>
+    <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+
+<!-- PAGE HEADER — title kept as plain text; NO data-translate on h1 to avoid overwriting the span -->
+<section class="page-hero diagnose-hero">
+  <div class="hero-bg">
+    <div class="hero-orb orb-1"></div>
+    <div class="hero-orb orb-2"></div>
+  </div>
+  <div class="page-hero-content">
+    <div class="hero-badge"><i class="fas fa-microscope"></i> AI Crop Diagnosis</div>
+    <h1><span class="gradient-text" data-translate="diagnose_title">Crop Disease Detector</span></h1>
+    <p data-translate="diagnose_subtitle">Upload or capture a photo of your affected crop for instant AI-powered diagnosis and eco-friendly remedy suggestions</p>
+  </div>
+</section>
+
+<!-- ═══════════════ MAIN DIAGNOSE AREA ═══════════════ -->
+<section class="section diagnose-section">
+  <div class="container">
+    <div class="diagnose-layout">
+
+      <!-- ── LEFT: Upload Panel ── -->
+      <div class="upload-panel">
+
+        <!-- Upload Zone (visible by default) -->
+        <div class="upload-zone" id="uploadZone"
+             ondrop="handleDrop(event)"
+             ondragover="handleDragOver(event)"
+             ondragleave="handleDragLeave(event)">
+          <div class="upload-icon"><i class="fas fa-image"></i></div>
+          <h3 data-translate="upload_title">Drop your crop image here</h3>
+          <p data-translate="upload_sub">Supports JPG, PNG, WEBP — max 10 MB</p>
+          <div class="upload-btns">
+            <label class="btn-primary upload-label" for="fileInput">
+              <i class="fas fa-upload"></i> <span data-translate="btn_upload">Upload Photo</span>
+            </label>
+            <button class="btn-secondary" onclick="openCamera()">
+              <i class="fas fa-camera"></i> <span data-translate="btn_camera">Take Photo</span>
+            </button>
+          </div>
+          <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFileSelect(event)"/>
+        </div>
+
+        <!-- Image Preview (hidden until image chosen) -->
+        <div class="image-preview" id="imagePreview" style="display:none">
+          <img id="previewImg" alt="Crop preview"/>
+          <div class="preview-overlay">
+            <button class="btn-icon" onclick="clearImage()" title="Remove image">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+          <div class="preview-label">
+            <i class="fas fa-check-circle" style="color:var(--green)"></i>
+            Image ready for analysis
+          </div>
+        </div>
+
+        <!-- Camera feed (hidden until camera opened) -->
+        <div class="camera-modal" id="cameraModal" style="display:none">
+          <div class="camera-wrapper">
+            <video id="cameraFeed" autoplay playsinline></video>
+            <div class="camera-controls">
+              <button class="btn-icon close-cam-btn" onclick="closeCamera()" title="Close camera">
+                <i class="fas fa-times"></i>
+              </button>
+              <button class="btn-capture" onclick="capturePhoto()" title="Capture photo">
+                <i class="fas fa-circle"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Analyze Button (hidden until image ready) -->
+        <button class="btn-analyze" id="analyzeBtn" onclick="analyzeImage()" style="display:none">
+        <i class="fas fa-wand-magic-sparkles"></i>
+        <span data-translate="btn_analyze">Analyze Crop</span>
+          <div class="btn-shine"></div>
+        </button>
+
+        <!-- Tips card -->
+        <div class="tips-card">
+          <div class="tips-header"><i class="fas fa-lightbulb"></i> <span data-translate="tips_header">Photo Tips for Best Results</span><br></div>
+          <ul class="tips-list">
+            <li data-translate="tip1">Focus on the most visibly affected area</li>
+            <li data-translate="tip2">Use natural daylight — avoid harsh shadows</li>
+            <li data-translate="tip3">Include both healthy and affected parts if possible</li>
+            <li data-translate="tip4">Keep the camera steady and close (30–50 cm)</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── RIGHT: Results Panel ── -->
+      <div class="results-panel" id="resultsPanel">
+        <div class="results-placeholder" id="resultsPlaceholder">
+          <div class="placeholder-icon"><i class="fas fa-leaf"></i></div>
+          <h3 data-translate="results_placeholder">Upload a crop image to begin diagnosis</h3>
+          <p data-translate="results_placeholder_sub">Our AI will identify the disease and suggest eco-friendly treatments</p>
+          <div class="placeholder-steps">
+            <div class="ps-item"><span class="ps-num">1</span> Upload or capture image</div>
+            <div class="ps-item"><span class="ps-num">2</span> Click Analyze Crop</div>
+            <div class="ps-item"><span class="ps-num">3</span> Get instant AI diagnosis</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.diagnose-layout -->
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section how-section">
+  <div class="container">
+    <div class="section-header">
+      <div class="section-tag"><i class="fas fa-circle-info"></i></div>
+      <h2 data-translate="how_title">How It Works</h2>
+    </div>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <div class="step-icon"><i class="fas fa-camera"></i></div>
+        <h4 data-translate="step1_title">Capture or Upload</h4>
+<p data-translate="step1_desc">Take a clear photo of the affected crop leaf, stem, or fruit</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <div class="step-icon"><i class="fas fa-brain"></i></div>
+        <h4 data-translate="step2_title">AI Analysis</h4>
+<p data-translate="step2_desc">Our AI model analyzes visual patterns to identify diseases with high accuracy</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <div class="step-icon"><i class="fas fa-leaf"></i></div>
+        <h4 data-translate="step3_title">Get Remedies</h4>
+        <p data-translate="step3_desc">Receive eco-friendly and chemical treatment plans with dosage details instantly</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="disclaimer-container">
+    <p><small><strong>⚠️ Disclaimer:</strong> SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.</small></p>
+  </div>
+  <div class="container">
+    <div class="footer-brand">
+      <div class="brand-icon small"><i class="fas fa-seedling"></i></div>
+      <span>Smart<span class="brand-accent">Agro</span></span>
+    </div>
+    <p class="footer-copy">© 2026 SmartAgro. Built for India's farmers.</p>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<nav id="mobileBottomNav">
+  <a href="/"><i class="fas fa-home"></i><span>Home</span></a>
+  <a href="/diagnose" class="active"><i class="fas fa-microscope"></i><span>Diagnose</span></a>
+  <a href="/market"><i class="fas fa-chart-line"></i><span>Mandi Prices</span></a>
+  <a href="/alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+</nav>
+
+<script src="/static/js/translations.js"></script>
+<script src="/static/js/main.js"></script>
+<script src="/static/js/diagnose.js"></script>
+<script src="/static/js/kisan-helper.js"></script>
+</body>
+</html>

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartAgro – Alerts</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="/static/css/alerts.css" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#4ade80" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SmartAgro" />
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+</head>
+
+<body>
+
+  <!-- ═══════════════════════ NAVBAR ═══════════════════════ -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-brand">
+      <div class="brand-icon"><i class="fas fa-seedling"></i></div>
+      <span class="brand-text">Smart<span class="brand-accent">Agro</span></span>
+    </div>
+    <div class="nav-links" id="navLinks">
+      <a href="/" class="nav-item" data-translate="nav_dashboard"><i
+          class="fas fa-th-large"></i><span>Dashboard</span></a>
+      <a href="/diagnose" class="nav-item" data-translate="nav_diagnose"><i class="fas fa-microscope"></i><span>Diagnose
+          Crop</span></a>
+      <a href="/market" class="nav-item" data-translate="nav_market"><i class="fas fa-chart-line"></i><span>Market
+          Prices</span></a>
+      <a href="/alerts" class="nav-item active" data-translate="nav_alerts"><i
+          class="fas fa-bell"></i><span>Alerts</span></a>
+    </div>
+    <div class="nav-actions">
+      <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme">
+        <i class="fas fa-moon" id="themeIcon"></i>
+      </button>
+      <div class="lang-selector" id="langSelector">
+        <button class="lang-btn" id="langBtn">
+          <i class="fas fa-globe"></i><span id="currentLang">EN</span><i class="fas fa-chevron-down"></i>
+        </button>
+        <div class="lang-dropdown" id="langDropdown">
+          <div class="lang-search"><input type="text" placeholder="Search language..." id="langSearch" /></div>
+          <div class="lang-list" id="langList"></div>
+        </div>
+      </div>
+      <button class="install-btn" id="installBtn" title="Install SmartAgro App">
+        <i class="fas fa-download"></i><span>Install App</span>
+      </button>
+      <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════ PAGE HERO ═══════════════════════ -->
+  <section class="page-hero alerts-hero">
+    <div class="hero-bg">
+      <div class="hero-orb orb-1"></div>
+      <div class="hero-orb orb-2"></div>
+    </div>
+    <div class="alerts-top-right-bar">
+      <button class="notif-btn-top-right" id="alertsNotifBtn" onclick="if(window.SmartAgroNotifications){window.SmartAgroNotifications.requestPermission(function(g){if(g)window.SmartAgroNotifications.sendNotification('🌾 SmartAgro Notification',{body:'Device notifications are active! You will receive pop-up alerts even when SmartAgro is closed.'});})}">
+        <i class="fas fa-bell"></i> <span data-translate="btn_notifications">Notifications</span>
+      </button>
+    </div>
+    <div class="page-hero-content">
+      <div class="hero-badge pulse-badge"><i class="fas fa-bell"></i> <span data-translate="live_alerts">Live
+          Alerts</span></div>
+      <h1 data-translate="alerts_title"><span class="gradient-text">Farm Alert's Center</span></h1>
+      <p data-translate="alerts_subtitle">Real-time weather warnings, pest advisories, and crop safety alerts for your
+        region</p>
+
+      <!-- Quick Jump -->
+      <div class="quick-jump-bar" id="quickJumpBar">
+        <a href="#cropsAtRiskAnchor" class="quick-jump-btn qj-risk" onclick="return smoothJump('cropsAtRiskAnchor')" title="Click to view Crops at Risk">
+          <i class="fas fa-triangle-exclamation"></i> <span data-translate="quick_jump_risk">Crops at Risk</span>
+        </a>
+        <a href="#safeToGrowAnchor" class="quick-jump-btn qj-safe" onclick="return smoothJump('safeToGrowAnchor')" title="Click to view Safe to Grow">
+          <i class="fas fa-leaf"></i> <span data-translate="quick_jump_safe">Safe to Grow</span>
+        </a>
+        <a href="#riskChartAnchor" class="quick-jump-btn" onclick="return smoothJump('riskChartAnchor')" style="border-color: rgba(56,189,248,0.35);" title="Click to view Risk Level Overview">
+          <i class="fas fa-chart-pie" style="color: #38bdf8;"></i> <span>Risk Level Overview</span>
+        </a>
+        <a href="#cropRiskAnchor" class="quick-jump-btn" onclick="return smoothJump('cropRiskAnchor')" style="border-color: rgba(251,191,36,0.35);" title="Click to view Crop Risk Forecast">
+          <i class="fas fa-seedling" style="color: #fbbf24;"></i> <span>Crop Risk Forecast</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Alert Summary Bar -->
+    <div class="alert-summary-bar" id="alertSummaryBar">
+      <div class="summary-card card-danger">
+        <i class="fas fa-circle-exclamation"></i>
+        <div>
+          <span class="summary-count" id="dangerCount">0</span>
+          <span data-translate="alert_danger">Critical</span>
+        </div>
+      </div>
+      <div class="summary-card card-warning">
+        <i class="fas fa-triangle-exclamation"></i>
+        <div>
+          <span class="summary-count" id="warningCount">0</span>
+          <span data-translate="alert_warning">Warning</span>
+        </div>
+      </div>
+      <div class="summary-card card-info">
+        <i class="fas fa-circle-info"></i>
+        <div>
+          <span class="summary-count" id="infoCount">0</span>
+          <span data-translate="alert_info">Advisory</span>
+        </div>
+      </div>
+      <div class="summary-card card-total">
+        <i class="fas fa-bell"></i>
+        <div>
+          <span class="summary-count" id="totalCount">0</span>
+          <span data-translate="alert_total">Total Alerts</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ MAIN TABS ═══════════════════════ -->
+  <section class="section alerts-main-tabs" style="padding-bottom: 0;">
+    <div class="container">
+      <div class="main-period-tabs">
+        <button class="period-tab active" onclick="switchPeriodTab('normal')" id="tabNormal">
+          <i class="fas fa-bolt"></i> Current Alerts
+        </button>
+        <button class="period-tab" onclick="switchPeriodTab('weekly')" id="tabWeekly">
+          <i class="fas fa-calendar-week"></i> Weekly Alerts
+        </button>
+        <button class="period-tab" onclick="switchPeriodTab('monthly')" id="tabMonthly">
+          <i class="fas fa-calendar-days"></i> Monthly Alerts
+        </button>
+        <button class="period-tab" onclick="switchPeriodTab('seasonal')" id="tabSeasonal">
+          <i class="fas fa-cloud-sun"></i> Seasonal Alerts
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ WEEKLY VIEW ═══════════════════════ -->
+  <div id="weeklyAlertsView">
+
+  <!-- ═══════════════════════ ACTIVE ALERTS ═══════════════════════ -->
+  <section class="section alerts-section" id="alertsSection" style="display:none">
+    <div class="container">
+
+
+
+      <!-- Best Harvest Day Banner -->
+      <div class="best-harvest-banner" id="bestHarvestBanner" style="display:none">
+        <div class="bh-icon"><i class="fas fa-check-double"></i></div>
+        <div class="bh-text">
+          <h4 id="bhTitle">Best Harvest Day</h4>
+          <p id="bhDesc">Analyzing safe windows...</p>
+        </div>
+      </div>
+
+      <!-- Day Tabs & Trend Line & Share Button -->
+      <div class="day-tabs-container" id="dayTabsRowWrapper" style="display:none">
+        <div class="day-tabs-header">
+          <div class="day-tabs" id="dayTabsRow"></div>
+          <button class="btn-whatsapp-share" id="waShareBtn" onclick="shareToWhatsApp()" title="Share to WhatsApp">
+            <i class="fab fa-whatsapp"></i> Share
+          </button>
+        </div>
+        <div class="trend-chart-container">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Filter Tabs -->
+      <div class="alert-filters">
+        <button class="alert-tab active" onclick="filterAlerts('all')" data-translate="filter_all_alerts">All
+          Alerts</button>
+        <button class="alert-tab" onclick="filterAlerts('danger')" data-translate="filter_critical">Critical</button>
+        <button class="alert-tab" onclick="filterAlerts('warning')" data-translate="filter_warnings">Warnings</button>
+        <button class="alert-tab" onclick="filterAlerts('info')" data-translate="filter_advisories">Advisories</button>
+        <button class="alert-tab" onclick="filterAlerts('Weather')" data-translate="filter_weather_tab">Weather</button>
+        <button class="alert-tab" onclick="filterAlerts('Pest')" data-translate="filter_pest_tab">Pest</button>
+        <button class="alert-tab" onclick="filterAlerts('Crop Advisory')" data-translate="filter_crop_tab">Crop</button>
+        <button class="btn-whatsapp-share" id="waShareBtnNormal" onclick="shareToWhatsApp()" title="Share to WhatsApp" style="margin-left: auto; padding: 6px 12px; font-size: 0.85rem;">
+          <i class="fab fa-whatsapp"></i> Share
+        </button>
+      </div>
+
+
+
+      <!-- Alerts List -->
+      <div class="alerts-list" id="alertsList">
+        <div class="alerts-loading">
+          <div class="loading-spinner"></div>
+          <p data-translate="loading_alerts">Analyzing weather and pest data...</p>
+        </div>
+      </div>
+
+      <!-- No Alerts -->
+      <div class="no-alerts" id="noAlerts" style="display:none">
+        <div class="no-alerts-icon"><i class="fas fa-check-circle"></i></div>
+        <h3 data-translate="no_alerts_title">All Clear! No Active Alerts</h3>
+        <p data-translate="no_alerts_sub">Conditions are favorable for farming in your area</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ PESTICIDE SAFETY ═══════════════════════ -->
+  <section class="section pesticide-safety-section" id="pesticideSafetySection" style="display:none">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-tag"><i class="fas fa-flask"></i></div>
+        <h2 data-translate="pesticide_title">Pesticide Safety Guide</h2>
+        <p data-translate="pesticide_sub">Recommended dosage and harmful combinations to avoid</p>
+      </div>
+      <div class="pesticide-grid" id="pesticideGrid"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ HARMFUL CROPS ALERT ═══════════════════════ -->
+  <section class="section harmful-section" id="harmfulSection" style="display:none">
+    <div class="container">
+      <div class="section-header" id="cropsAtRiskAnchor">
+        <div class="section-tag"><i class="fas fa-skull-crossbones"></i></div>
+        <h2 data-translate="harmful_title">Crops at Risk in Current Conditions</h2>
+        <p data-translate="harmful_sub">Avoid growing these crops in present weather conditions</p>
+      </div>
+      <div class="harmful-grid" id="harmfulGrid"></div>
+
+      <!-- Safe Crops -->
+      <div class="section-header" id="safeToGrowAnchor" style="margin-top: 3rem;">
+        <div class="section-tag safe"><i class="fas fa-shield-halved"></i></div>
+        <h2 data-translate="safe_title">Safe to Grow Now</h2>
+        <p data-translate="safe_sub">These crops are well-suited for current weather conditions</p>
+      </div>
+      <div class="safe-grid" id="safeGrid"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ WEATHER RISK CHART ═══════════════════════ -->
+  <section class="section risk-chart-section" id="riskChartSection" style="display:none">
+    <div class="container">
+      <div class="section-header" id="riskChartAnchor">
+        <div class="section-tag"><i class="fas fa-chart-pie"></i></div>
+        <h2 data-translate="risk_chart_title">Risk Level Overview</h2>
+        <p data-translate="risk_chart_sub">Visual breakdown of current agricultural risk factors</p>
+      </div>
+      <div class="risk-chart-layout">
+        <div class="chart-canvas-wrap">
+          <canvas id="riskChart"></canvas>
+        </div>
+        <div class="risk-factors" id="riskFactors"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ CROP RISK FORECAST ═══════════════════════ -->
+  <section class="section crop-risk-section" id="cropRiskSection" style="display:none">
+    <div class="container">
+      <div class="section-header" id="cropRiskAnchor">
+        <div class="section-tag"><i class="fas fa-seedling"></i></div>
+        <h2 data-translate="crop_risk_title">Crop Risk Forecast</h2>
+        <p data-translate="crop_risk_sub">How your recommended crops hold up against the next 6 days</p>
+      </div>
+      <div class="crop-risk-grid" id="cropRiskGrid"></div>
+    </div>
+  </section>
+  </div> <!-- End Weekly View -->
+
+  <!-- ═══════════════════════ MONTHLY VIEW ═══════════════════════ -->
+  <div id="monthlyAlertsView" style="display:none">
+    <section class="section monthly-section">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag"><i class="fas fa-calendar-alt"></i></div>
+          <h2>30-Day Risk Outlook</h2>
+          <p>Long-term forecast trend for your area</p>
+        </div>
+        <div class="monthly-calendar" id="monthlyCalendar">
+          <div class="loading-spinner"></div>
+          <p>Analyzing 30-day trends...</p>
+        </div>
+      </div>
+    </section>
+  </div> <!-- End Monthly View -->
+
+  <!-- ═══════════════════════ SEASONAL VIEW ═══════════════════════ -->
+  <div id="seasonalAlertsView" style="display:none">
+    <section class="section seasonal-section">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-tag"><i class="fas fa-leaf"></i></div>
+          <h2 id="seasonalTitle">Seasonal Alerts</h2>
+          <p id="seasonalSub">Overall advisories for the current season</p>
+        </div>
+        <div class="seasonal-grid" id="seasonalGrid">
+          <div class="loading-spinner"></div>
+          <p>Generating seasonal advisory...</p>
+        </div>
+      </div>
+    </section>
+  </div> <!-- End Seasonal View -->
+
+  <!-- ═══════════════════════ FOOTER ═══════════════════════ -->
+  <footer class="footer">
+    <div class="disclaimer-container">
+      <p><small><strong>⚠️ Disclaimer:</strong> SmartAgro gives general information only --- not a fully dependent
+          diagnosis and recommendation.</small></p>
+    </div>
+    <div class="container">
+      <div class="footer-brand">
+        <div class="brand-icon small"><i class="fas fa-seedling"></i></div>
+        <span>Smart<span class="brand-accent">Agro</span></span>
+      </div>
+      <p data-translate="footer_text">Empowering farmers with AI-driven precision agriculture</p>
+      <p class="footer-copy">© 2026 SmartAgro. Built for India's farmers.</p>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+  <nav id="mobileBottomNav">
+    <a href="/"><i class="fas fa-home"></i><span>Home</span></a>
+    <a href="/diagnose"><i class="fas fa-microscope"></i><span>Diagnose</span></a>
+    <a href="/market"><i class="fas fa-chart-line"></i><span>Mandi Prices</span></a>
+    <a href="/alerts" class="active"><i class="fas fa-bell"></i><span>Alerts</span></a>
+  </nav>
+
+  <script src="/static/js/translations.js"></script>
+  <script src="/static/js/main.js"></script>
+  <script src="/static/js/alerts.js"></script>
+  <script src="/static/js/kisan-helper.js"></script>
+</body>
+
+</html>

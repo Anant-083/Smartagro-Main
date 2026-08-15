@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SmartAgro – Offline</title>
+  <link rel="stylesheet" href="/static/css/main.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Inter:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; text-align:center; padding:24px; }
+    .offline-icon { font-size:5rem; margin-bottom:24px; animation: float 3s ease-in-out infinite; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+    h1 { font-family:'Syne',sans-serif; font-size:2rem; margin-bottom:12px; }
+    p  { color:var(--text-2); margin-bottom:28px; }
+    .btn-primary { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div>
+    <div class="offline-icon">🌾</div>
+    <h1>You're Offline</h1>
+    <p>No internet connection. Please check your network and try again.</p>
+    <button class="btn-primary" onclick="window.location.reload()">
+      🔄 Try Again
+    </button>
+  </div>
+</body>
+</html>

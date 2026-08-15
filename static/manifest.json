@@ -1,0 +1,46 @@
+{
+    "name": "SmartAgro – AI Crop Intelligence",
+    "short_name": "SmartAgro",
+    "description": "AI-powered crop advisory, disease detection and market prices for farmers",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0a0f0a",
+    "theme_color": "#4ade80",
+    "orientation": "portrait-primary",
+    "icons": [{
+            "src": "/static/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/static/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "screenshots": [{
+        "src": "/static/icons/screenshot1.png",
+        "sizes": "390x844",
+        "type": "image/png",
+        "form_factor": "narrow"
+    }],
+    "categories": ["agriculture", "productivity", "weather"],
+    "shortcuts": [{
+            "name": "Diagnose Crop",
+            "url": "/diagnose",
+            "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Market Prices",
+            "url": "/market",
+            "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Alerts",
+            "url": "/alerts",
+            "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+        }
+    ]
+}
