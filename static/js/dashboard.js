@@ -766,8 +766,21 @@ function getActivityColor(type) {
 function renderPesticides(pesticides) {
     const section = document.getElementById('pestSection');
     const cards = document.getElementById('pestCards');
-    if (!section || !cards || !pesticides || pesticides.length === 0) return;
+    if (!section || !cards) return;
     section.style.display = '';
+
+    if (!pesticides || pesticides.length === 0) {
+        cards.innerHTML = `
+        <div class="pest-buffering-box">
+          <div>
+            <div style="font-weight:700;color:var(--text-1);margin-bottom:4px">
+              <i class="fas fa-circle-info" style="color:var(--text-3);margin-right:6px"></i>
+              ${dt('No pesticide guide available for the recommended crops yet.')}
+            </div>
+          </div>
+        </div>`;
+        return;
+    }
 
     cards.innerHTML = pesticides.map(p => `
     <div class="pest-crop-card">
