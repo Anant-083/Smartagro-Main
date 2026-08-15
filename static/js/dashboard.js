@@ -321,11 +321,12 @@ async function loadWeatherAndCrops(lat, lon) {
         }
     }
 
-    const [data, txData] = await Promise.all([weatherPromise, translationsPromise]);
+   const [data, txData] = await Promise.all([weatherPromise, translationsPromise]);
     if (!data) { hideDashTranslateOverlay(); return; }
+    const cropPromise = loadCropRecommendations(data.current);
 
-    // Apply translations before first render so every dt() call is resolved
-    if (txData && txData.translations && Object.keys(txData.translations).length) {
+// Apply translations before first render so every dt() call is resolved
+if (txData && txData.translations && Object.keys(txData.translations).length) {
         window._dashTrans = txData.translations;
         window._dashTransLang = txData.lang || lang;
     }
@@ -360,7 +361,7 @@ async function loadWeatherAndCrops(lat, lon) {
         renderVegetationHealth(data.vegetation);
     }
 
-    loadCropRecommendations(data.current);
+   
 }
 
 /* ── Hero weather card ──────────────────────── */
