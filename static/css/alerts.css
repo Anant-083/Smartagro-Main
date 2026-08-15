@@ -668,6 +668,7 @@
 .cal-safe { background: rgba(74,222,128,0.05); border-color: rgba(74,222,128,0.2); }
 .cal-warning { background: rgba(251,191,36,0.05); border-color: rgba(251,191,36,0.2); }
 .cal-danger { background: rgba(248,113,113,0.05); border-color: rgba(248,113,113,0.2); }
+.cal-unavailable { background: rgba(148,163,184,0.04); border-color: rgba(148,163,184,0.15); opacity: 0.7; }
 
 .cal-date {
   font-size: 0.75rem;
@@ -810,4 +811,4 @@
   border-top-color: var(--green, #4ade80);
   border-radius: 50%;
   animation: atxSpin 0.8s linear infinite;
-}
+}
