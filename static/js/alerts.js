@@ -513,7 +513,10 @@ async function getRecommendedCrops() {
 async function loadCropRiskForecast() {
     try {
         const crops = await getRecommendedCrops();
-        if (!crops.length) return;
+        if (!crops.length) {
+            renderCropRisk([]);
+            return;
+        }
 
         const riskRes = await fetch('/api/crop-risk', {
             method: 'POST',
@@ -524,14 +527,35 @@ async function loadCropRiskForecast() {
         renderCropRisk(riskData.crops || []);
     } catch (err) {
         console.error('Crop risk error:', err);
+        // Never leave the "Calculating Crop Risk Forecast..." spinner
+        // frozen — show an honest failure message instead.
+        const grid = document.getElementById('cropRiskGrid');
+        const section = document.getElementById('cropRiskSection');
+        if (grid && section) {
+            section.style.display = '';
+            grid.innerHTML = `
+            <div class="weekly-buffering-box">
+                <div><i class="fas fa-triangle-exclamation" style="color:var(--amber);margin-right:6px"></i>
+                ${_at('Could not load crop risk forecast right now.') || 'Could not load crop risk forecast right now.'}</div>
+            </div>`;
+        }
     }
 }
 
 function renderCropRisk(crops) {
     const section = document.getElementById('cropRiskSection');
     const grid = document.getElementById('cropRiskGrid');
-    if (!section || !grid || crops.length === 0) return;
+    if (!section || !grid) return;
     section.style.display = '';
+
+    if (!crops || crops.length === 0) {
+        grid.innerHTML = `
+        <div class="weekly-buffering-box">
+            <div><i class="fas fa-circle-info" style="color:var(--text-3);margin-right:6px"></i>
+            ${_at('No crop risk data available yet.') || 'No crop risk data available yet.'}</div>
+        </div>`;
+        return;
+    }
 
 
     const levelColor = { High: 'var(--red)', Medium: 'var(--amber)', Low: 'var(--green)' };
@@ -1207,6 +1231,22 @@ async function loadMonthlyAlerts() {
             const dayNum = dateObj.getDate();
             const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
             
+            // Days beyond the real ~6-day weather forecast window have no
+            // actual data — the backend honestly marks these as
+            // risk: "unavailable" / risk_pct: null rather than guessing.
+            // Render that state as its own distinct "no data" card instead
+            // of silently falling through to a fake "Safe, 0%" — that would
+            // misrepresent unmeasured days as verified-safe ones.
+            if (d.risk === 'unavailable' || d.data_available === false) {
+                return `
+                <div class="cal-day cal-unavailable" title="No forecast data available this far out yet">
+                    <div class="cal-date">${dayName} <strong>${dayNum}</strong></div>
+                    <div class="cal-icon"><i class="fas fa-circle-question" style="color:var(--text-3)"></i><span style="color:var(--text-3)">No data</span></div>
+                    <div style="font-size: 0.72rem; font-weight: 700; text-align: center; margin-top: 6px; color: var(--text-3)">Beyond forecast range</div>
+                    <ul class="cal-alerts-text"><li>Check back closer to this date</li></ul>
+                </div>`;
+            }
+
             let bgClass = 'cal-safe';
             let icon = '<i class="fas fa-check-circle" style="color:var(--green)"></i><span>Safe</span>';
             if (d.risk === 'danger') { bgClass = 'cal-danger'; icon = '<i class="fas fa-triangle-exclamation" style="color:var(--red)"></i><span style="color:var(--red)">Critical</span>'; }
@@ -1218,7 +1258,7 @@ async function loadMonthlyAlerts() {
             <div class="cal-day ${bgClass}" title="${d.alerts.map(a => a.title).join(', ')}">
                 <div class="cal-date">${dayName} <strong>${dayNum}</strong></div>
                 <div class="cal-icon">${icon}</div>
-                <div style="font-size: 0.72rem; font-weight: 700; text-align: center; margin-top: 6px; color: ${d.risk === 'danger' ? 'var(--red)' : d.risk === 'warning' ? 'var(--amber)' : 'var(--green)'}">Risk: ${d.risk_pct || 0}%</div>
+                <div style="font-size: 0.72rem; font-weight: 700; text-align: center; margin-top: 6px; color: ${d.risk === 'danger' ? 'var(--red)' : d.risk === 'warning' ? 'var(--amber)' : 'var(--green)'}">Risk: ${d.risk_pct}%</div>
                 <ul class="cal-alerts-text">${alertsHtml}</ul>
             </div>`;
         }).join('');
