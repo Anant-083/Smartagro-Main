@@ -617,11 +617,21 @@ def get_pesticide_guide(crops):
         "Wheat":  [{"pest":"Aphids","pesticide":"Dimethoate 30 EC","dose":"1 L/ha","timing":"At tillering stage","eco":False},{"pest":"Yellow rust","pesticide":"Propiconazole 25 EC","dose":"500 ml/ha","timing":"At boot leaf stage","eco":False}],
         "Maize":  [{"pest":"Fall Armyworm","pesticide":"Spinetoram 11.7 SC","dose":"450 ml/ha","timing":"7-10 days after infestation","eco":False},{"pest":"Stem borer","pesticide":"Emamectin Benzoate 5 SG","dose":"220 g/ha","timing":"At whorl stage","eco":False}],
         "Cotton": [{"pest":"Bollworm","pesticide":"Chlorpyriphos 20 EC","dose":"2.5 ml/L","timing":"At first boll formation","eco":False},{"pest":"Whitefly","pesticide":"Neem Oil 5%","dose":"5 ml/L","timing":"Every 7 days","eco":True}],
+        "Soybean":   [{"pest":"Girdle Beetle","pesticide":"Thiamethoxam 25 WG","dose":"100 g/ha","timing":"At 15-20 days after sowing","eco":False},{"pest":"Semi-looper","pesticide":"Neem Oil 5%","dose":"2.5 L/ha","timing":"At first sign of damage","eco":True}],
+        "Mustard":   [{"pest":"Aphids","pesticide":"Imidacloprid 17.8 SL","dose":"100 ml/ha","timing":"At flowering stage","eco":False},{"pest":"Painted bug","pesticide":"Neem Oil 5%","dose":"2.5 L/ha","timing":"At first sign of damage","eco":True}],
+        "Potato":    [{"pest":"Aphids","pesticide":"Thiamethoxam 25 WG","dose":"100 g/ha","timing":"At 30 days after planting","eco":False},{"pest":"Late blight","pesticide":"Mancozeb 75 WP","dose":"2.5 g/L","timing":"At first sign of disease","eco":False}],
+        "Onion":     [{"pest":"Thrips","pesticide":"Fipronil 5 SC","dose":"1 L/ha","timing":"At 30-45 days after transplanting","eco":False},{"pest":"Purple blotch","pesticide":"Mancozeb 75 WP","dose":"2.5 g/L","timing":"At first sign of disease","eco":False}],
+        "Chilli":    [{"pest":"Thrips & Mites","pesticide":"Abamectin 1.8 EC","dose":"0.5 ml/L","timing":"At first sign of infestation","eco":False},{"pest":"Fruit rot","pesticide":"Neem Oil 5%","dose":"5 ml/L","timing":"Every 7 days","eco":True}],
+        "Groundnut": [{"pest":"Leaf miner","pesticide":"Emamectin Benzoate 5 SG","dose":"220 g/ha","timing":"At first sign of damage","eco":False},{"pest":"Tikka leaf spot","pesticide":"Mancozeb 75 WP","dose":"2.5 g/L","timing":"At first sign of disease","eco":False}],
+        "Sugarcane": [{"pest":"Early Shoot Borer","pesticide":"Chlorpyriphos 20 EC","dose":"2.5 ml/L","timing":"At 30-45 days after planting","eco":False},{"pest":"Pyrilla","pesticide":"Neem Oil 5%","dose":"5 ml/L","timing":"Every 7 days","eco":True}],
+        "Tomato":    [{"pest":"Fruit Borer","pesticide":"Emamectin Benzoate 5 SG","dose":"220 g/ha","timing":"At flowering stage","eco":False},{"pest":"Whitefly","pesticide":"Neem Oil 5%","dose":"5 ml/L","timing":"Every 7 days","eco":True}],
     }
+    generic_guide = [{"pest": "General pests & fungal disease", "pesticide": "Neem Oil 5%", "dose": "5 ml/L", "timing": "At first sign of pest or disease activity", "eco": True}]
+
     result = []
     for crop in crops:
-        if crop["name"] in guides:
-            result.append({"crop": crop["name"], "guides": guides[crop["name"]]})
+        name = crop.get("name", "")
+        result.append({"crop": name, "guides": guides.get(name, generic_guide)})
     return result
 
 
