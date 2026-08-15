@@ -15,4 +15,4 @@ COPY . .
 EXPOSE 7860
 
 # Run the application (adjusting for Hugging Face's required port)
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "2", "--threads", "4", "--timeout", "60", "app:app"]
