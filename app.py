@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+from concurrent.futures import ThreadPoolExecutor
 import requests 
 
 # ── Windows fix: force IPv4 for outbound requests ───────────────────────────
@@ -67,9 +68,24 @@ print(f"[AgroSmart] Sentinel-2 NDVI: {'ENABLED (rasterio available)' if _RASTERI
 
 # ─── Sentinel-2 Real NDVI (via Earth Search STAC + COG pixel read) ───────────
 # Cache: keyed by rounded lat/lon grid (0.01° ≈ 1 km), TTL = 6 hours
-_ndvi_cache: dict = {}
+_NDVI_CACHE_PATH = os.path.join(basedir, "ndvi_cache.json")
 _NDVI_CACHE_TTL = 6 * 3600  # seconds
 
+def _load_ndvi_cache():
+    try:
+        with open(_NDVI_CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_ndvi_cache(cache):
+    try:
+        with open(_NDVI_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+    except Exception as e:
+        print(f"[NDVI] Could not persist cache: {e}")
+
+_ndvi_cache: dict = _load_ndvi_cache()
 
 def _ndvi_status(ndvi: float) -> str:
     """Convert NDVI value to human-readable vegetation status label."""
@@ -193,6 +209,7 @@ def get_sentinel2_ndvi(lat: float, lon: float) -> dict | None:
         "cloud_pct": cloud_pct,
     }
     _ndvi_cache[cache_key] = {"ts": now, "data": result}
+    _save_ndvi_cache(_ndvi_cache)
     print(f"[NDVI] Result: NDVI={ndvi}, status='{status}'")
     return result
 
@@ -233,8 +250,11 @@ def get_weather():
                     f"?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&cnt=56")
 
     try:
-        current_resp  = requests.get(current_url,  timeout=10)
-        forecast_resp = requests.get(forecast_url, timeout=10)
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            current_future  = ex.submit(requests.get, current_url,  timeout=10)
+            forecast_future  = ex.submit(requests.get, forecast_url, timeout=10)
+            current_resp  = current_future.result()
+            forecast_resp = forecast_future.result()
 
         if current_resp.status_code == 429 or forecast_resp.status_code == 429:
             return jsonify({
