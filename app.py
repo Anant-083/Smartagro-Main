@@ -213,8 +213,11 @@ def get_sentinel2_ndvi(lat: float, lon: float) -> dict | None:
             "GDAL_HTTP_TIMEOUT":            "20",
         }
         with rasterio.Env(**env_opts):
-            red_val = _read_cog_pixel(red_url)
-            nir_val = _read_cog_pixel(nir_url)
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                red_future = ex.submit(_read_cog_pixel, red_url)
+                nir_future = ex.submit(_read_cog_pixel, nir_url)
+                red_val = red_future.result()
+                nir_val = nir_future.result()
     except Exception as exc:
         print(f"[NDVI] COG read error: {exc}")
         return None
@@ -325,22 +328,6 @@ def get_weather():
         # what's here instead of assuming a fixed 6-day window.
         forecast_list = sorted(daily.values(), key=lambda d: d["date"])[:6]
 
-        # ── Fetch real NDVI from Sentinel-2 via Earth Search STAC ────────────
-        ndvi_result = get_sentinel2_ndvi(float(lat), float(lon))
-        if ndvi_result:
-            ndvi_val   = ndvi_result["ndvi"]
-            veg_status = ndvi_result["status"]
-            veg_obs_date = ndvi_result["obs_date"]
-            veg_source   = ndvi_result["source"]
-            veg_cloud    = ndvi_result.get("cloud_pct", None)
-        else:
-            # Graceful fallback when satellite data is unavailable
-            ndvi_val     = None
-            veg_status   = "Data Unavailable"
-            veg_obs_date = None
-            veg_source   = "Satellite"
-            veg_cloud    = None
-
         return jsonify({
             "current": {
                 "city":        current_data.get("name", "Your Location"),
@@ -357,17 +344,59 @@ def get_weather():
                 "rain":        current_data.get("rain", {}).get("1h", 0),
             },
             "forecast": forecast_list,
-            "vegetation": {
-                "ndvi":      ndvi_val,
-                "status":    veg_status,
-                "obs_date":  veg_obs_date,
-                "source":    veg_source,
-                "cloud_pct": veg_cloud,
-            }
         })
     except Exception as e:
         print(f"[Weather error] {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ─── Vegetation / NDVI ────────────────────────────────────────────────────
+# Split out from /api/weather on purpose: a real Sentinel-2 lookup can involve
+# several sequential network calls to STAC + streamed satellite image reads.
+# That's fine as its OWN request, loaded in the background after the page's
+# main content (weather, crop recs) is already showing — but it must never
+# be allowed to hold up the initial page load itself, which is what was
+# happening when this ran inline inside /api/weather.
+_NDVI_REQUEST_BUDGET_SEC = 8  # hard cap: give up and report "unavailable" past this
+
+
+@app.route("/api/vegetation")
+def get_vegetation():
+    lat = request.args.get("lat")
+    lon = request.args.get("lon")
+    if not lat or not lon:
+        return jsonify({"error": "Location required"}), 400
+
+    def _fallback():
+        return {
+            "ndvi": None, "status": "Data Unavailable", "obs_date": None,
+            "source": "Satellite", "cloud_pct": None,
+        }
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(get_sentinel2_ndvi, float(lat), float(lon))
+            try:
+                ndvi_result = future.result(timeout=_NDVI_REQUEST_BUDGET_SEC)
+            except concurrent.futures.TimeoutError:
+                # Real satellite pipelines can occasionally stall on a slow
+                # upstream host — report honestly rather than hang the tab.
+                print(f"[NDVI] Timed out after {_NDVI_REQUEST_BUDGET_SEC}s for ({lat},{lon})")
+                return jsonify(_fallback())
+
+        if not ndvi_result:
+            return jsonify(_fallback())
+
+        return jsonify({
+            "ndvi":      ndvi_result["ndvi"],
+            "status":    ndvi_result["status"],
+            "obs_date":  ndvi_result["obs_date"],
+            "source":    ndvi_result["source"],
+            "cloud_pct": ndvi_result.get("cloud_pct", None),
+        })
+    except Exception as e:
+        print(f"[Vegetation error] {e}")
+        return jsonify(_fallback())
 
 
 # ─── Crop Recommendations ────────────────────────────────────────────────────
