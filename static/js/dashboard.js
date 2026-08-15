@@ -294,9 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadWeatherAndCrops(lat, lon) {
     showHeroLoading();
 
-    const lang = (localS
-    storage.getItem('agrosmart_lang') || 'en').toLowerCase().trim();
-
+    const lang = (localStorage.getItem('agrosmart_lang') || 'en').toLowerCase().trim();
     // Kick off weather and translations in parallel.
     // The loading spinner stays visible until BOTH are done, so the very
     // first render is already in the user's selected language.
