@@ -355,11 +355,33 @@ if (txData && txData.translations && Object.keys(txData.translations).length) {
     const mapSection = document.getElementById('locationMapSection');
     if (mapSection) mapSection.style.display = '';
     initSatelliteMap(lat, lon);
-    if (data.vegetation) {
-        renderVegetationHealth(data.vegetation);
-    }
+    // Vegetation is now its own request (see /api/vegetation on the backend).
+    // A real satellite lookup can take a few seconds, so it must NOT hold up
+    // weather/crops from showing — fetch it in the background and fill the
+    // card in whenever it resolves, instead of awaiting it up front.
+    loadVegetationHealth(lat, lon);
+}
 
-   
+/* ── Vegetation health: fetched separately so a slow satellite lookup
+   never blocks the rest of the homepage from rendering ─────────────── */
+async function loadVegetationHealth(lat, lon) {
+    const container = document.getElementById('vegHealthContainer');
+    if (container) {
+        container.innerHTML = `
+        <div class="veg-loading" style="text-align:center;padding:24px 0;opacity:.7">
+            <div class="loading-spinner" style="width:24px;height:24px;margin:0 auto 8px;"></div>
+            <span>${dt('Checking satellite imagery…')}</span>
+        </div>`;
+    }
+    try {
+        const res = await fetch(`/api/vegetation?lat=${lat}&lon=${lon}`);
+        const vegData = await res.json();
+        if (vegData) renderVegetationHealth(vegData);
+    } catch (e) {
+        // Non-fatal — leave the card showing "Data Unavailable" rather than
+        // breaking the rest of the page.
+        renderVegetationHealth({ ndvi: null, status: 'Data Unavailable', obs_date: null, source: 'Satellite', cloud_pct: null });
+    }
 }
 
 /* ── Hero weather card ──────────────────────── */
