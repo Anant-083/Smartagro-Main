@@ -266,6 +266,79 @@ def offline():
     return render_template('offline.html')
 
 # ─── Weather API ─────────────────────────────────────────────────────────────
+# ─── Open-Meteo — real extended forecast (free, no key, up to 16 days) ──────
+# OpenWeather's free tier only gives ~5-6 real forecast days. Open-Meteo is
+# free with no API key and no rate limit, and genuinely provides up to 16
+# real daily forecast days — used here to extend the Alerts 30-day calendar
+# with real data for roughly half its span instead of leaving those days
+# blank/unavailable. Days beyond 16 still have no real forecast anywhere and
+# are honestly reported as unavailable, never invented.
+_WMO_CODE_MAP = {
+    0:  ("clear sky", "01"),          1:  ("mainly clear", "01"),
+    2:  ("partly cloudy", "02"),      3:  ("overcast", "04"),
+    45: ("fog", "50"),                48: ("depositing rime fog", "50"),
+    51: ("light drizzle", "09"),      53: ("moderate drizzle", "09"),
+    55: ("dense drizzle", "09"),      56: ("light freezing drizzle", "09"),
+    57: ("dense freezing drizzle", "09"),
+    61: ("slight rain", "10"),        63: ("moderate rain", "10"),
+    65: ("heavy rain", "10"),         66: ("light freezing rain", "10"),
+    67: ("heavy freezing rain", "10"),
+    71: ("slight snow fall", "13"),   73: ("moderate snow fall", "13"),
+    75: ("heavy snow fall", "13"),    77: ("snow grains", "13"),
+    80: ("slight rain showers", "09"),   81: ("moderate rain showers", "09"),
+    82: ("violent rain showers", "09"),
+    85: ("slight snow showers", "13"),   86: ("heavy snow showers", "13"),
+    95: ("thunderstorm", "11"),
+    96: ("thunderstorm with slight hail", "11"),
+    99: ("thunderstorm with heavy hail", "11"),
+}
+
+
+def _openmeteo_wmo_info(code):
+    desc, icon_base = _WMO_CODE_MAP.get(code, ("", "01"))
+    return desc, icon_base + "d"
+
+
+def _fetch_openmeteo_forecast(lat, lon):
+    """Real daily forecast (up to 16 days) from Open-Meteo. Returns [] on any
+    failure — callers must treat a missing day as unavailable, never guess."""
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&daily=weathercode,temperature_2m_max,temperature_2m_min,"
+            "precipitation_sum,windspeed_10m_max,relative_humidity_2m_mean"
+            "&timezone=auto&forecast_days=16"
+        )
+        resp = requests.get(url, timeout=8)
+        if resp.status_code != 200:
+            return []
+        daily = resp.json().get("daily", {})
+        dates = daily.get("time", [])
+        out = []
+        for i, date_str in enumerate(dates):
+            try:
+                code = daily["weathercode"][i]
+                desc, icon = _openmeteo_wmo_info(code)
+                out.append({
+                    "date":        date_str,
+                    "temp_max":    daily["temperature_2m_max"][i],
+                    "temp_min":    daily["temperature_2m_min"][i],
+                    "description": desc,
+                    "icon":        icon,
+                    "humidity":    (daily.get("relative_humidity_2m_mean") or [60]*len(dates))[i],
+                    "wind_speed":  (daily.get("windspeed_10m_max") or [10]*len(dates))[i],
+                    "rain":        (daily.get("precipitation_sum") or [0]*len(dates))[i],
+                    "source":      "open-meteo",
+                })
+            except (IndexError, KeyError, TypeError):
+                continue
+        return out
+    except Exception as e:
+        print(f"[Open-Meteo error] {e}")
+        return []
+
+
 @app.route("/api/weather")
 def get_weather():
     lat = request.args.get("lat")
@@ -280,11 +353,13 @@ def get_weather():
                     f"?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&cnt=56")
 
     try:
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            current_future  = ex.submit(requests.get, current_url,  timeout=10)
-            forecast_future  = ex.submit(requests.get, forecast_url, timeout=10)
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            current_future   = ex.submit(requests.get, current_url,  timeout=10)
+            forecast_future   = ex.submit(requests.get, forecast_url, timeout=10)
+            openmeteo_future  = ex.submit(_fetch_openmeteo_forecast, lat, lon)
             current_resp  = current_future.result()
             forecast_resp = forecast_future.result()
+            openmeteo_days = openmeteo_future.result()
 
         if current_resp.status_code == 429 or forecast_resp.status_code == 429:
             return jsonify({
@@ -321,12 +396,21 @@ def get_weather():
                     if item["main"]["temp_min"] < daily[day]["temp_min"]:
                         daily[day]["temp_min"] = item["main"]["temp_min"]
 
-        # Only real OpenWeather data — never fabricate extra days. The free
-        # /forecast endpoint returns 3-hour steps up to 5 days (~5-6 daily
-        # buckets depending on the hour of the request), so forecast_list
-        # length can legitimately vary; the frontend should render exactly
-        # what's here instead of assuming a fixed 6-day window.
-        forecast_list = sorted(daily.values(), key=lambda d: d["date"])[:6]
+        # Real OpenWeather days first (more precise, updated more often) —
+        # never fabricated. The free /forecast endpoint returns 3-hour steps
+        # up to 5 days (~5-6 daily buckets depending on the hour of the
+        # request), so this length can legitimately vary.
+        openweather_days = sorted(daily.values(), key=lambda d: d["date"])
+        for d in openweather_days:
+            d["source"] = "openweather"
+
+        # Extend with real Open-Meteo days for any date OpenWeather doesn't
+        # already cover, up to 16 total days. Still real forecast data, not
+        # invented — just a second free, keyless source with longer real
+        # range than OpenWeather's free tier gives.
+        covered_dates = {d["date"] for d in openweather_days}
+        extra_days = [d for d in openmeteo_days if d["date"] not in covered_dates]
+        forecast_list = sorted(openweather_days + extra_days, key=lambda d: d["date"])[:16]
 
         return jsonify({
             "current": {
@@ -1633,7 +1717,7 @@ def _ai_alerts_for_forecast(city, lat, lon, forecast_days):
         return cached[1]
 
     prompt = f"""You are an agricultural officer for {city or 'India'}.
-Analyze this 6-day weather forecast for local farmers:
+Analyze this {len(forecast_days)}-day weather forecast for local farmers:
 {days_summary}
 
 Provide specific, realistic agricultural alerts tailored to EACH day's exact weather.
@@ -1664,7 +1748,7 @@ Respond ONLY with valid JSON:
         "model":       "llama-3.1-8b-instant",
         "messages":    [{"role": "user", "content": prompt}],
         "temperature": 0.5,
-        "max_tokens":  5000,
+        "max_tokens":  7000,
         "response_format": {"type": "json_object"}
     }
     try:
