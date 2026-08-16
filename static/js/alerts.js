@@ -367,12 +367,16 @@ async function checkUpcomingRisks() {
     }
 
     try {
-        // 1. Day-wise alerts for the next 6 days
+        // 1. Day-wise alerts for the next 7 days (the "weekly" view is
+        // intentionally capped here — the Monthly tab fetches its own
+        // wider window separately in loadMonthlyAlerts(), so this cap
+        // doesn't limit how many real days the Monthly calendar can show).
+        const weeklyForecast = currentForecast.slice(0, 7);
         const res = await fetch('/api/alerts-forecast', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                forecast: currentForecast,
+                forecast: weeklyForecast,
                 today_alerts: allAlerts,
                 city: currentWeather ? currentWeather.city : '',
                 lat: currentWeather ? currentWeather.lat : null,
@@ -521,7 +525,7 @@ async function loadCropRiskForecast() {
         const riskRes = await fetch('/api/crop-risk', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ crops, forecast: currentForecast })
+            body: JSON.stringify({ crops, forecast: currentForecast.slice(0, 7) })
         });
         const riskData = await riskRes.json();
         renderCropRisk(riskData.crops || []);
@@ -1214,12 +1218,43 @@ async function loadMonthlyAlerts() {
     if (!currentForecast || currentForecast.length === 0) return;
 
     try {
+        // The weekly view above is capped to 7 days on purpose, but the
+        // Monthly calendar should get real data for as many days as the
+        // forecast genuinely covers (up to ~16 real days). If the real
+        // forecast is longer than what the weekly fetch already covered,
+        // fetch alerts for the full window here instead of reusing the
+        // 7-day-capped dailyAlertsData.
+        let monthlyDailyAlerts = dailyAlertsData || [];
+        if (currentForecast.length > (dailyAlertsData ? dailyAlertsData.length : 0)) {
+            try {
+                const extRes = await fetch('/api/alerts-forecast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        forecast: currentForecast,
+                        today_alerts: allAlerts,
+                        city: currentWeather ? currentWeather.city : '',
+                        lat: currentWeather ? currentWeather.lat : null,
+                        lon: currentWeather ? currentWeather.lon : null
+                    })
+                });
+                const extData = await extRes.json();
+                if (extData.daily && extData.daily.length) {
+                    monthlyDailyAlerts = extData.daily;
+                }
+            } catch (extErr) {
+                console.error('Monthly extended forecast error:', extErr);
+                // Fall back to whatever the weekly fetch already gave us
+                // rather than failing the whole calendar.
+            }
+        }
+
         const res = await fetch('/api/monthly-alerts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 forecast: currentForecast,
-                daily_alerts: dailyAlertsData || []
+                daily_alerts: monthlyDailyAlerts
             })
         });
         const data = await res.json();
