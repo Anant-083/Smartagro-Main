@@ -113,7 +113,7 @@ function showDashTranslateOverlay(langCode) {
     const name = DASH_LANG_DISPLAY_NAMES[langCode] || langCode.toUpperCase();
     overlay.innerHTML = `
       <div class="dash-translate-box" style="position:relative">
-        <button onclick="if (window._dashTranslateController) window._dashTranslateController.abort(); document.getElementById('dashTranslateOverlay').classList.remove('visible')" style=
+        <button onclick="if (window._dashTranslateController) window._dashTranslateController.abort(); document.getElementById('dashTranslateOverlay').classList.remove('visible')" style="position:absolute;top:8px;right:10px;background:rgba(255,255,255,.1);border:none;color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .2s" onmouseover="this.style.background='rgba(248,113,113,.4)'" onmouseout="this.style.background='rgba(255,255,255,.1)'" title="Cancel">&times;</button>
         <div class="dash-translate-spinner"></div>
         <div class="dash-translate-title">Translating to ${name}<span class="dash-translate-dots"><span>.</span><span>.</span><span>.</span></span></div>
         <div class="dash-translate-sub">First-time translation can take a few seconds. It'll be instant after this.</div>
