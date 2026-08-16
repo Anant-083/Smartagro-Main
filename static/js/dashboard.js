@@ -471,7 +471,7 @@ function renderWeatherSection(current, forecast) {
     const forecastGrid = document.getElementById('forecastGrid');
     if (forecastGrid && forecast) {
         const todayStr = new Date().toISOString().split('T')[0];
-        forecastGrid.innerHTML = forecast.map((day, i) => `
+        forecastGrid.innerHTML = forecast.slice(0, 6).map((day, i) => `
       <div class="forecast-card ${day.date === todayStr ? 'today' : ''}" style="animation-delay:${i * 0.06}s">
         <div class="fc-day">${getDayName(day.date)}</div>
         <div class="fc-icon">${getWeatherEmoji(day.icon)}</div>
