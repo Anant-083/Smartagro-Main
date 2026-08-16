@@ -318,7 +318,7 @@ function showWeeklyBuffering() {
             <div>
                 <h4 style="color:var(--text-1);font-weight:600;margin-bottom:4px">
                     <i class="fas fa-calendar-week" style="color:var(--green);margin-right:6px"></i>
-                    ${_at('Loading 6-Day Weekly Forecast & Risk Analysis...') || 'Loading 6-Day Weekly Forecast & Risk Analysis...'}
+                    ${_at('Loading Extended Forecast & Risk Analysis...') || 'Loading Extended Forecast & Risk Analysis...'}
                 </h4>
                 <p style="color:var(--text-3);font-size:0.83rem">
                     ${_at('Analyzing weather patterns, pest advisories, and crop safety for the week.') || 'Analyzing weather patterns, pest advisories, and crop safety for the week.'}
@@ -414,7 +414,7 @@ async function checkUpcomingRisks() {
         console.error('Check upcoming risks error:', err);
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = `<i class="fas fa-cloud-sun-rain"></i> <span>${_at('Check Upcoming Risks (6-Day Forecast)') || 'Check Upcoming Risks (6-Day Forecast)'}</span>`;
+            btn.innerHTML = `<i class="fas fa-cloud-sun-rain"></i> <span>${_at('Check Upcoming Risks (Extended Forecast)') || 'Check Upcoming Risks (Extended Forecast)'}</span>`;
         }
     }
 }
@@ -1231,7 +1231,8 @@ async function loadMonthlyAlerts() {
             const dayNum = dateObj.getDate();
             const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
             
-            // Days beyond the real ~6-day weather forecast window have no
+            // Days beyond real forecast coverage (OpenWeather + Open-Meteo
+            // combined give real data for roughly the first 16 days) have no
             // actual data — the backend honestly marks these as
             // risk: "unavailable" / risk_pct: null rather than guessing.
             // Render that state as its own distinct "no data" card instead
