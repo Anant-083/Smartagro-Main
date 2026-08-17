@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Usage Analytics — SmartAgro</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <style>
+    body { padding: 28px; max-width: 980px; margin: 0 auto; }
+    h1 { margin: 0 0 4px; font-size: 24px; }
+    .sub { color: #9ca3af; font-size: 13px; margin-bottom: 20px; }
+    .cards { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 22px; }
+    .card { flex: 1; min-width: 150px; background: #0b1220; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
+    .card .num { font-size: 28px; font-weight: 700; color: #4ade80; line-height: 1.1; }
+    .card .lbl { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+    .toolbar { display: flex; gap: 12px; margin-bottom: 12px; align-items: center; }
+    .btn { background: #14532d; color: #fff; border: 1px solid #22c55e; border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
+    .btn:hover { background: #166534; }
+    .btn.danger { background: #450a0a; border-color: #ef4444; color: #fca5a5; }
+    table { width: 100%; border-collapse: collapse; background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #1f2937; font-size: 13px; }
+    th { color: #9ca3af; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    tr:last-child td { border-bottom: none; }
+    .kind-page { color: #60a5fa; } .kind-api { color: #a78bfa; }
+    .bar { background: #1f2937; border-radius: 4px; height: 8px; overflow: hidden; }
+    .bar > div { background: #22c55e; height: 100%; }
+    .daily h3 { margin: 24px 0 10px; font-size: 15px; }
+    .daily-item { display: flex; align-items: center; gap: 12px; padding: 4px 0; font-size: 13px; }
+    .daily-item .d { width: 110px; color: #d1d5db; }
+    .daily-item .c { width: 44px; color: #4ade80; font-weight: 700; }
+    .daily-item .bar { flex: 1; }
+    .empty { color: #6b7280; text-align: center; padding: 32px; }
+  </style>
+</head>
+<body>
+  <h1>📊 Usage Analytics</h1>
+  <div class="sub" id="sub">Per-feature usage counters (aggregate only — no personal data)</div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="toolbar">
+    <button class="btn" onclick="loadUsage()">↻ Refresh</button>
+    <button class="btn danger" onclick="resetUsage()">Reset counters</button>
+    <span id="err" style="color:#f87171;font-size:12px"></span>
+  </div>
+
+  <table>
+    <thead><tr><th>Feature</th><th>Type</th><th>Uses</th><th>Share</th><th>Last used</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="daily" id="daily"></div>
+
+  <script>
+    async function loadUsage() {
+      const err = document.getElementById('err'); if (err) err.textContent = '';
+      try {
+        const res = await fetch('/api/usage');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const d = await res.json();
+        render(d);
+      } catch (e) {
+        const r = document.getElementById('rows'); if (r) r.innerHTML = '<tr><td colspan="5" class="empty">Could not load usage data: ' + e.message + '</td></tr>';
+      }
+    }
+
+    function render(d) {
+      const since = d.since ? new Date(d.since).toLocaleDateString() : '—';
+      document.getElementById('sub').textContent =
+        'Per-feature usage since ' + since + ' — aggregate counters only, no personal data.';
+
+      document.getElementById('cards').innerHTML = [
+        { n: d.total || 0, l: 'Total feature uses' },
+        { n: (d.by_kind && d.by_kind.api) || 0, l: 'API calls' },
+        { n: (d.by_kind && d.by_kind.page) || 0, l: 'Page views' },
+        { n: Object.keys(d.daily || {}).length, l: 'Days tracked' }
+      ].map(c => '<div class="card"><div class="num">' + c.n + '</div><div class="lbl">' + c.l + '</div></div>').join('');
+
+      const tbody = document.getElementById('rows');
+      const features = (d.features || []).slice(0, 40);
+      tbody.innerHTML = features.length
+        ? features.map(f => {
+            const pct = d.total ? Math.round((f.count / d.total) * 100) : 0;
+            return '<tr><td>' + f.label + '</td>' +
+              '<td class="' + (f.kind === 'page' ? 'kind-page' : 'kind-api') + '">' + f.kind + '</td>' +
+              '<td>' + f.count + '</td>' +
+              '<td style="min-width:120px"><div class="bar"><div style="width:' + pct + '%"></div></div></td>' +
+              '<td style="color:#9ca3af">' + (f.last_used || '—') + '</td></tr>';
+          }).join('')
+        : '<tr><td colspan="5" class="empty">No usage recorded yet. Open some features first.</td></tr>';
+
+      const daily = d.daily || {};
+      const max = Math.max(1, ...Object.values(daily));
+      const days = Object.keys(daily).sort().reverse();
+      document.getElementById('daily').innerHTML =
+        '<h3>📅 Daily activity</h3>' +
+        (days.length
+          ? days.map(dt => '<div class="daily-item"><span class="d">' + dt + '</span><span class="c">' + daily[dt] + '</span>' +
+              '<div class="bar"><div style="width:' + Math.round((daily[dt] / max) * 100) + '%"></div></div></div>').join('')
+          : '<div class="empty">No activity recorded yet.</div>');
+    }
+
+    async function resetUsage() {
+      if (!confirm('Reset all usage counters? This cannot be undone.')) return;
+      const err = document.getElementById('err');
+      try {
+        const res = await fetch('/api/usage/reset', { method: 'POST' });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { if (err) err.textContent = 'Reset failed: ' + (d.error || res.status); return; }
+        loadUsage();
+      } catch (e) { if (err) err.textContent = 'Reset failed: ' + e.message; }
+    }
+
+    loadUsage();
+  </script>
+</body>
+</html>
