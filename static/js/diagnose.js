@@ -470,6 +470,23 @@ async function analyzeImage() {
         } catch (parseErr) {
             throw new Error(`Server responded ${res.status} (no JSON body)`);
         }
+
+        if (data.not_a_crop_image) {
+            showToast(data.error || tr("That doesn't look like a plant photo."), 'error');
+            if (panel) panel.innerHTML = `
+              <div class="results-placeholder">
+                <div class="placeholder-icon" style="opacity:1;color:var(--amber)">
+                  <i class="fas fa-image"></i>
+                </div>
+                <h3 style="color:var(--amber)">${tr('Not a Crop Photo')}</h3>
+                <p>${data.error || tr("This doesn't look like a plant or crop photo. Please upload a clear photo of a leaf, stem, fruit, or affected part of your crop.")}</p>
+                <button class="btn-secondary" style="margin-top:16px" onclick="analyzeImage()">
+                  <i class="fas fa-rotate"></i> ${tr('Try Again')}
+                </button>
+              </div>`;
+            return;
+        }
+
         if (!res.ok || data.error) {
             throw new Error(data.error || `Server responded ${res.status}`);
         }
