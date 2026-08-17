@@ -22,6 +22,7 @@ import os
 import json
 import re
 import time
+import calendar
 import hashlib
 import threading
 import concurrent.futures
@@ -43,6 +44,21 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, '.env'))
 
 app = Flask(__name__)
+
+# ── Build version for cache-busting ─────────────────────────────────────────
+# Static JS/CSS is cached by browsers for 7 days (see below). Without a
+# version marker, a fresh deploy's fixes silently never reach anyone whose
+# browser already cached the old files. This value changes every time the
+# server restarts (i.e. every deploy), so appending it as a query string
+# (?v=...) on every <script>/<link> tag forces a fresh download exactly once
+# per deploy, while still letting the 7-day cache work normally in between.
+BUILD_VERSION = str(int(time.time()))
+
+
+@app.context_processor
+def inject_build_version():
+    return {"build_version": BUILD_VERSION}
+
 
 # ── Gzip/Brotli-compress every response (HTML/JS/CSS/JSON) ─────────────────
 # translations.js alone is ~177KB uncompressed; gzip typically cuts JS/JSON
@@ -2567,8 +2583,14 @@ def get_monthly_alerts():
         except ValueError:
             pass
     daily_alerts = { d.get("date"): d for d in data.get("daily_alerts", []) }
-            
-    for i in range(30):
+
+    # Show only the rest of the CURRENT calendar month (today through the
+    # month's last day) instead of a fixed rolling 30 days, so it never
+    # spills into next month.
+    days_in_month = calendar.monthrange(base_date.year, base_date.month)[1]
+    days_remaining_in_month = days_in_month - base_date.day + 1
+
+    for i in range(days_remaining_in_month):
         curr_date = base_date + timedelta(days=i)
         date_str = curr_date.strftime("%Y-%m-%d")
         
