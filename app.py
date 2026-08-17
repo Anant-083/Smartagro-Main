@@ -1,6 +1,8 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, g, send_file
 from concurrent.futures import ThreadPoolExecutor
-import requests 
+import requests
+import logging
+import uuid
 
 # ── Windows fix: force IPv4 for outbound requests ───────────────────────────
 # If a browser reaches a URL instantly but Python's `requests` times out on 
@@ -23,7 +25,9 @@ import json
 import re
 import time
 import calendar
+import base64
 import hashlib
+import difflib
 import threading
 import concurrent.futures
 from datetime import datetime, timedelta
@@ -44,6 +48,31 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, '.env'))
 
 app = Flask(__name__)
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
+# ── Structured logging ───────────────────────────────────────────────────────
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)-7s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("smartagro")
+
+
+@app.before_request
+def _request_start():
+    g._start = time.monotonic()
+    g.request_id = uuid.uuid4().hex[:10]
+
+
+@app.after_request
+def _log_request(response):
+    dur_ms = (time.monotonic() - g.get("_start", time.monotonic())) * 1000
+    logger.info("%s %s -> %s (%.0fms) rid=%s",
+                request.method, request.path, response.status_code, dur_ms,
+                g.get("request_id", "-"))
+    return response
 
 # ── Build version for cache-busting ─────────────────────────────────────────
 # Static JS/CSS is cached by browsers for 7 days (see below). Without a
@@ -92,6 +121,128 @@ GROQ_API_KEY        = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY       = os.getenv("GEMINI_API_KEY", "")
 NINJA_API_KEY       = os.getenv("NINJA_API_KEY", "")  # no longer used by /api/market (kept for backward-compat only)
 DEBUG_MODE          = os.getenv("FLASK_DEBUG", "0") == "1"
+
+# Gemini is used as a genuinely INDEPENDENT second vision model in the crop
+# diagnosis ensemble. Only active when GEMINI_API_KEY is set in .env.
+GEMINI_DIAGNOSIS_MODEL = os.getenv("GEMINI_DIAGNOSIS_MODEL", "gemini-3.1-flash-lite")
+
+# ── Per-feature usage analytics ─────────────────────────────────────────────
+# Tracks how often each SmartAgro feature is used (page views + API calls) as
+# aggregate counters — NO personal data, NO IPs, NO message content. Counters
+# live in memory and are persisted atomically to a JSON file in batches.
+USAGE_LOG_PATH = os.path.join(basedir, "usage_stats.json")
+_USAGE_SAVE_INTERVAL = 30  # seconds between automatic disk writes
+
+_usage_stats = None
+_usage_lock = threading.Lock()
+_last_usage_save = 0.0
+
+_USAGE_FEATURE_LABELS = {
+    "index":                       ("Dashboard Page",               "page"),
+    "diagnose":                    ("Crop Diagnosis Page",         "page"),
+    "market":                      ("Market Page",                 "page"),
+    "alerts":                      ("Alerts Page",                 "page"),
+    "offline":                     ("Offline Page",                "page"),
+    "get_ndvi":                    ("Satellite NDVI",              "api"),
+    "get_weather":                 ("Live Weather",                "api"),
+    "crop_recommendations":        ("Crop Recommendations",        "api"),
+    "get_market_data":             ("Mandi Market Prices",         "api"),
+    "debug_market":                ("Market Debug",                "api"),
+    "kisan_chat":                  ("Kisan Helper Chat",           "api"),
+    "speech_to_text":              ("Voice Input (STT)",           "api"),
+    "diagnose_crop":               ("Crop Diagnosis",              "api"),
+    "diagnose_log":                ("Diagnosis QA Log",            "api"),
+    "diagnose_log_image":          ("Diagnosis QA Image",          "api"),
+    "diagnose_log_review":         ("Diagnosis Review",            "api"),
+    "diagnose_log_accuracy":       ("Diagnosis Accuracy",          "api"),
+    "get_alerts":                  ("Instant Alerts",              "api"),
+    "alerts_forecast":             ("6-Day Forecast Alerts",       "api"),
+    "monthly_alerts":              ("Monthly Outlook Alerts",      "api"),
+    "seasonal_alerts":             ("Seasonal Advisories",         "api"),
+    "crop_risk":                   ("Crop Risk / Harvest Window",  "api"),
+    "translate_market":            ("Market Translation",          "api"),
+    "clear_translation_cache":     ("Translation Cache Clear",     "api"),
+    "translate_alerts":            ("Alerts Translation",          "api"),
+    "translate_dashboard":         ("Dashboard Translation",       "api"),
+    "translate_diagnose":          ("Diagnose Translation",        "api"),
+    "translate_diagnosis_result":  ("Diagnosis Result Translation","api"),
+}
+
+
+def _load_usage_stats():
+    global _usage_stats
+    if _usage_stats is not None:
+        return
+    try:
+        with open(USAGE_LOG_PATH, "r", encoding="utf-8") as f:
+            _usage_stats = json.load(f)
+    except Exception:
+        _usage_stats = {}
+    _usage_stats.setdefault("since", datetime.now().isoformat(timespec="seconds"))
+    _usage_stats.setdefault("features", {})
+    _usage_stats.setdefault("daily", {})
+
+
+def _save_usage_stats():
+    if _usage_stats is None:
+        return
+    try:
+        tmp_path = USAGE_LOG_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(_usage_stats, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, USAGE_LOG_PATH)
+    except Exception as e:
+        logger.warning(f"[Usage] Could not persist usage stats: {e}")
+
+
+def _flush_usage_stats():
+    global _last_usage_save
+    with _usage_lock:
+        _load_usage_stats()
+        _save_usage_stats()
+        _last_usage_save = time.monotonic()
+
+
+def _track_usage(endpoint, label=None, kind="api"):
+    global _last_usage_save
+    now = datetime.now()
+    with _usage_lock:
+        _load_usage_stats()
+        feats = _usage_stats["features"]
+        rec = feats.setdefault(endpoint, {
+            "label": label or endpoint, "kind": kind, "count": 0,
+        })
+        rec["count"] += 1
+        rec["last_used"] = now.isoformat(timespec="seconds")
+        today = now.strftime("%Y-%m-%d")
+        _usage_stats["daily"][today] = _usage_stats["daily"].get(today, 0) + 1
+        if time.monotonic() - _last_usage_save >= _USAGE_SAVE_INTERVAL:
+            _last_usage_save = time.monotonic()
+            _save_usage_stats()
+
+
+@app.before_request
+def _track_usage_request():
+    ep = request.endpoint or ""
+    if not ep or ep == "static" or ep in ("usage", "usage_api", "usage_reset", "healthz", "readyz"):
+        return
+    label, kind = _USAGE_FEATURE_LABELS.get(ep, (None, "api"))
+    _track_usage(ep, label if label is not None else ep, kind)
+
+# ── Diagnosis QA logging ─────────────────────────────────────────────────
+# Every diagnosis (image + full model output, from every ensemble pass) is
+# persisted here so a human can spot-check the AI against the real photo
+# later. This is the "proof of accuracy" pipeline.
+DIAGNOSIS_LOG_DIR    = os.getenv("DIAGNOSIS_LOG_DIR", os.path.join(os.path.expanduser("~"), "SmartAgro_Logs"))
+DIAGNOSIS_IMAGES_DIR = os.path.join(DIAGNOSIS_LOG_DIR, "images")
+DIAGNOSIS_LOG_PATH   = os.path.join(DIAGNOSIS_LOG_DIR, "log.jsonl")
+os.makedirs(DIAGNOSIS_IMAGES_DIR, exist_ok=True)
+_diagnosis_log_lock = threading.Lock()
+
+# Number of independent diagnosis passes to run and cross-check per image.
+ENSEMBLE_PASSES = 2
 
 _translation_cache = {}
 
@@ -280,6 +431,68 @@ def alerts():
 @app.route('/offline')
 def offline():
     return render_template('offline.html')
+
+
+# ─── Usage Analytics (per-feature) ───────────────────────────────────────────
+@app.route("/usage")
+def usage():
+    return render_template("usage.html")
+
+
+@app.route("/api/usage")
+def usage_api():
+    _flush_usage_stats()
+    with _usage_lock:
+        stats = json.loads(json.dumps(_usage_stats))
+    features = stats.get("features", {})
+    rows = sorted(features.items(), key=lambda kv: -kv[1]["count"])
+    total = sum(rec["count"] for _, rec in rows)
+    by_kind = {}
+    for _, rec in rows:
+        by_kind[rec["kind"]] = by_kind.get(rec["kind"], 0) + rec["count"]
+    return jsonify({
+        "since":   stats.get("since"),
+        "total":   total,
+        "by_kind": by_kind,
+        "daily":   stats.get("daily", {}),
+        "features": [
+            {"endpoint": ep, "label": rec.get("label", ep), "kind": rec.get("kind", "api"),
+             "count": rec.get("count", 0), "last_used": rec.get("last_used")}
+            for ep, rec in rows
+        ],
+    })
+
+
+@app.route("/api/usage/reset", methods=["POST"])
+def usage_reset():
+    global _usage_stats, _last_usage_save
+    with _usage_lock:
+        _usage_stats = {
+            "since": datetime.now().isoformat(timespec="seconds"),
+            "features": {},
+            "daily": {},
+        }
+        _save_usage_stats()
+        _last_usage_save = time.monotonic()
+    return jsonify({"ok": True})
+
+
+# ─── Health / readiness probes ───────────────────────────────────────────────
+@app.route("/healthz")
+def healthz():
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/readyz")
+def readyz():
+    return jsonify({
+        "status":      "ok",
+        "groq":        bool(GROQ_API_KEY),
+        "openweather": bool(OPENWEATHER_API_KEY),
+        "gemini":      bool(GEMINI_API_KEY),
+        "ndvi":        _RASTERIO_AVAILABLE,
+    }), 200
+
 
 # ─── Weather API ─────────────────────────────────────────────────────────────
 # ─── Open-Meteo — real extended forecast (free, no key, up to 16 days) ──────
@@ -1460,6 +1673,10 @@ def _gemini_chat_reply(system_prompt, messages):
 def kisan_chat():
     model = "openai/gpt-oss-120b"   # replaces deprecated llama-3.3-70b-versatile (shut down 08/16/26)
 
+    ip = request.remote_addr or "unknown"
+    if _is_rate_limited_chat(ip):
+        return jsonify({"error": "Too many requests. Please wait a moment."}), 429
+
     data = request.json or {}
     messages = data.get("messages", [])
     lang = data.get("lang", "en")
@@ -1584,6 +1801,10 @@ def speech_to_text():
     if not GROQ_API_KEY:
         return jsonify({"error": "GROQ_API_KEY not set in .env"}), 500
 
+    ip = request.remote_addr or "unknown"
+    if _is_rate_limited_stt(ip):
+        return jsonify({"error": "Too many requests. Please wait a moment."}), 429
+
     audio_file = request.files.get("audio")
     if not audio_file:
         return jsonify({"error": "No audio received"}), 400
@@ -1628,21 +1849,189 @@ def speech_to_text():
         return jsonify({"error": str(e)}), 500
 
 
-# ─── Diagnose Crop via Groq Vision ───────────────────────────────────────────
-MAX_IMAGE_B64_LEN = 14 * 1024 * 1024  # ~10 MB raw image (base64 inflates size by ~4/3), matches frontend's 10MB limit
+# ─── Shared sliding-window rate limiter ───────────────────────────────────────
+# Chat, STT, diagnosis, and translation endpoints each throttle per-IP with the
+# SAME sliding-window logic. The state lives in-process, so it is only
+# consistent under a SINGLE gunicorn worker (see Dockerfile: --workers 1).
+_rate_limit_state = {}
+_rate_limit_state_lock = threading.Lock()
+
+CHAT_LIMIT    = 20
+STT_LIMIT     = 20
+DIAGNOSE_LIMIT = 10
+
+
+def _rate_limit(action: str, ip: str, limit: int, window_seconds: int = 60) -> bool:
+    """Sliding-window rate limit. Returns True if allowed, False if exceeded."""
+    now = datetime.now().timestamp()
+    with _rate_limit_state_lock:
+        bucket = _rate_limit_state.setdefault(action, {})
+        times = [t for t in bucket.get(ip, []) if now - t < window_seconds]
+        if len(times) >= limit:
+            bucket[ip] = times
+            return False
+        times.append(now)
+        bucket[ip] = times
+        return True
+
+
+def _is_rate_limited_chat(ip: str) -> bool:
+    return not _rate_limit("chat", ip, CHAT_LIMIT)
+
+def _is_rate_limited_stt(ip: str) -> bool:
+    return not _rate_limit("stt", ip, STT_LIMIT)
+
+def _is_rate_limited_diagnose(ip: str) -> bool:
+    return not _rate_limit("diagnose", ip, DIAGNOSE_LIMIT)
+
+
+# ─── Diagnose Crop via ensemble (Groq + Gemini) ───────────────────────────────
+MAX_IMAGE_B64_LEN = 14 * 1024 * 1024  # ~10 MB raw image
+
+# Vision-capable models tried per ensemble pass. Today Groq only has one
+# production-viable multimodal model on the general tier — meta-llama/llama-4-
+# scout-17b-16e-instruct was deprecated June 17, 2026. Add a second entry here
+# as soon as one exists; no other code needs to change.
+vision_models = [
+    "qwen/qwen3.6-27b",
+]
+
+
+def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
+    """Run one diagnosis pass against one Groq vision model and return parsed
+    JSON, or None if that pass failed."""
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                {"type": "text", "text": prompt}
+            ]}
+        ],
+        "temperature": temperature,
+        "max_tokens": 1400,
+        "reasoning_effort": "none",
+    }
+    resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                          headers=headers, json=body, timeout=45)
+    if resp.status_code != 200:
+        return None
+    raw = resp.json()["choices"][0]["message"]["content"].strip()
+    cleaned = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if not match:
+        return None
+    return json.loads(match.group())
+
+
+def _run_gemini_pass(image_b64, prompt, sys_prompt):
+    """Run one diagnosis pass against Google's Gemini API and return parsed
+    JSON, or None on any failure. When GEMINI_API_KEY is configured this gives
+    the ensemble a genuinely INDEPENDENT second model (different vendor,
+    different weights) so an agreement between Groq & Gemini is real
+    cross-model evidence."""
+    if not GEMINI_API_KEY:
+        return None
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_DIAGNOSIS_MODEL}:generateContent")
+    body = {
+        "system_instruction": {"parts": [{"text": sys_prompt}]},
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}},
+                {"text": prompt},
+            ],
+        }],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 3000,
+                             "responseMimeType": "application/json"},
+    }
+    try:
+        resp = requests.post(url, headers={"Content-Type": "application/json",
+                            "x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=45)
+        if resp.status_code != 200:
+            logger.warning(f"[Diagnose] Gemini HTTP {resp.status_code}: {resp.text[:200]}")
+            return None
+        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        cleaned = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if not match:
+            return None
+        return json.loads(match.group())
+    except Exception as e:
+        logger.warning(f"[Diagnose] Gemini exception: {e}")
+        return None
+
+
+def _diseases_agree(name_a, name_b):
+    """Fuzzy-match two disease name strings so small phrasing differences
+    between passes still count as agreement, while genuinely different
+    diagnoses are correctly flagged as a disagreement."""
+    if not name_a or not name_b:
+        return False
+    a, b = name_a.strip().lower(), name_b.strip().lower()
+    if a == b:
+        return True
+    if "healthy" in a and "healthy" in b:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.6
+
+
+# ── QA logging: store every image + result for human spot-checking ──────
+def _save_diagnosis_image(image_b64, record_id):
+    """Persist the uploaded image next to its diagnosis record so a
+    reviewer can see exactly what the model saw. Returns the saved filename,
+    or None on failure (non-fatal)."""
+    try:
+        raw = base64.b64decode(image_b64)
+        img_hash = hashlib.sha256(raw).hexdigest()[:12]
+        filename = f"{record_id}_{img_hash}.jpg"
+        with open(os.path.join(DIAGNOSIS_IMAGES_DIR, filename), "wb") as f:
+            f.write(raw)
+        return filename
+    except Exception as e:
+        logger.warning(f"[DiagnosisLog] Could not save image: {e}")
+        return None
+
+
+def _log_diagnosis(record):
+    """Append one diagnosis record (image ref + every ensemble pass' raw
+    output + the merged final answer) to a JSONL audit log."""
+    try:
+        with _diagnosis_log_lock:
+            with open(DIAGNOSIS_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning(f"[DiagnosisLog] Could not write log entry: {e}")
+
+
 @app.route("/api/diagnose", methods=["POST"])
 def diagnose_crop():
     if not GROQ_API_KEY:
         return jsonify({"error": "GROQ_API_KEY not set in .env"}), 500
 
+    ip = request.remote_addr or "unknown"
+    if _is_rate_limited_diagnose(ip):
+        return jsonify({"error": "Too many requests. Please wait a moment."}), 429
+
     data = request.json or {}
     image_b64 = data.get("image", "")
-    lang      = data.get("lang", "en").strip().lower()
+    lang      = str(data.get("lang", "en")).strip().lower()
 
     if not image_b64:
         return jsonify({"error": "No image data received"}), 400
     if len(image_b64) > MAX_IMAGE_B64_LEN:
         return jsonify({"error": "Image too large. Please use an image under 10 MB."}), 413
+
+    # ── Step 1: decode + validate the image ──────────────────────────────
+    try:
+        image_raw = base64.b64decode(image_b64)
+    except Exception:
+        return jsonify({"error": "Image data is not valid base64"}), 400
+    image_sha256 = hashlib.sha256(image_raw).hexdigest()
+
     lang_name = LANG_NAMES.get(lang, "")
     if lang != "en" and lang_name:
         lang_instruction = (
@@ -1654,12 +2043,8 @@ def diagnose_crop():
     else:
         lang_instruction = ""
 
-    prompt = f"""You are an expert agricultural plant pathologist AI. Look very carefully at this image.
-
-FIRST, check: does this image actually show a plant, crop, leaf, stem, fruit, or root — something a farmer would photograph to ask about crop health? If it does NOT (e.g. it's a person, an animal, a random object, a screenshot, a blank/unclear image, or anything unrelated to plants), respond with EXACTLY this JSON and nothing else:
-{{"not_a_crop_image": true}}
-
-If it DOES show a plant/crop, respond ONLY with valid JSON, no markdown or backticks:
+    prompt = f"""You are an expert agricultural plant pathologist AI. Look very carefully at this crop image.
+Respond ONLY with valid JSON, no markdown or backticks:
 {{
   "disease": "Exact disease name",
   "confidence": 88,
@@ -1670,61 +2055,219 @@ If it DOES show a plant/crop, respond ONLY with valid JSON, no markdown or backt
   "chemical_remedies": [{{"name": "Chemical", "dose": "Dose per litre", "interval": "Days between sprays"}}],
   "prevention": ["tip1", "tip2", "tip3"],
   "recovery_timeline": "Weeks for recovery"
-}}{lang_instruction}""" 
-
-    if not GEMINI_API_KEY:
-        return jsonify({"error": "GEMINI_API_KEY not set in .env"}), 500
+}}{lang_instruction}"""
 
     sys_prompt = "Expert plant pathologist. Return ONLY valid JSON."
     if lang != "en" and lang_name:
         sys_prompt += f" All free-text values must be in {lang_name}."
 
-    body = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": sys_prompt + "\n\n" + prompt},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
-                ]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 3000,
-            "responseMimeType": "application/json"
+    # ── Step 2: ensemble / self-consistency passes ──────────────────────
+    # With a single Groq vision model configured (today's reality) this runs
+    # that model twice at different temperatures as a self-consistency
+    # cross-check. When a Gemini key is configured, a genuinely INDEPENDENT
+    # second model is appended to the ensemble — so an agreement between
+    # Groq & Gemini is real cross-model evidence.
+    pass_temperatures = [0.2, 0.6, 0.9]
+    pass_plan = [
+        (i, vision_models[i % len(vision_models)], pass_temperatures[i % len(pass_temperatures)])
+        for i in range(ENSEMBLE_PASSES)
+    ]
+    if GEMINI_API_KEY:
+        pass_plan.append((len(pass_plan), "gemini", 0.3))
+    pass_outcomes = [None] * len(pass_plan)
+
+    def _run_pass(i, model, temp):
+        try:
+            if model == "gemini":
+                return _run_gemini_pass(image_b64, prompt, sys_prompt)
+            return _run_vision_pass(image_b64, prompt, sys_prompt, model, temp)
+        except Exception as e:
+            logger.warning(f"[Diagnose] pass {i} ({model}) failed: {e}")
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(pass_plan)) as executor:
+        future_to_pass = {
+            executor.submit(_run_pass, i, model, temp): (i, model)
+            for i, model, temp in pass_plan
         }
-    }
+        for future in concurrent.futures.as_completed(future_to_pass):
+            i, model = future_to_pass[future]
+            parsed = future.result()
+            if parsed and parsed.get("disease"):
+                pass_outcomes[i] = (parsed, model)
 
-    last_status, last_body = None, None
+    results, models_used = [], []
+    gemini_display = f"gemini:{GEMINI_DIAGNOSIS_MODEL}"
+    for outcome in pass_outcomes:
+        if outcome is not None:
+            parsed, model = outcome
+            results.append(parsed)
+            models_used.append(gemini_display if model == "gemini" else model)
+
+    if not results:
+        if not GEMINI_API_KEY:
+            return jsonify({"error": "GEMINI_API_KEY not set in .env"}), 500
+        return jsonify({"error": "All vision models failed. Check your GROQ_API_KEY in .env"}), 500
+
+    # ── Step 3: merge / vote across passes ───────────────────────────────
+    primary = max(results, key=lambda r: r.get("confidence", 0))
+    others  = [r for r in results if r is not primary]
+
+    agreement = True
+    alternate_diagnosis = None
+    if others:
+        agree_flags = [_diseases_agree(primary.get("disease", ""), o.get("disease", "")) for o in others]
+        agreement = all(agree_flags)
+        if agreement:
+            confidences = [r.get("confidence", 0) for r in results]
+            primary["confidence"] = min(99, round(sum(confidences) / len(confidences)) + 5)
+        else:
+            primary["confidence"] = max(30, round(primary.get("confidence", 50) * 0.7))
+            disagreeing = next((o for o, f in zip(others, agree_flags) if not f), None)
+            if disagreeing:
+                alternate_diagnosis = disagreeing.get("disease")
+
+    primary["_lang"] = lang
+    primary["model_agreement"] = agreement
+    primary["_passes_run"] = len(results)
+    primary["_models_used"] = models_used
+    if alternate_diagnosis:
+        primary["alternate_diagnosis"] = alternate_diagnosis
+
+    # ── Step 4: log image + full result for human spot-checking ─────────
+    record_id = f"{int(time.time()*1000)}_{ip.replace('.', '-').replace(':', '-')}"
+    image_filename = _save_diagnosis_image(image_b64, record_id)
+    _log_diagnosis({
+        "id":                   record_id,
+        "timestamp":            datetime.now().isoformat(),
+        "ip":                   ip,
+        "lang":                 lang,
+        "image_sha256":         image_sha256,
+        "models_used":          models_used,
+        "passes_run":           len(results),
+        "model_agreement":      agreement,
+        "final_disease":        primary.get("disease"),
+        "final_confidence":     primary.get("confidence"),
+        "alternate_diagnosis":  alternate_diagnosis,
+        "severity":             primary.get("severity"),
+        "image_file":           image_filename,
+        "raw_results":          results,
+        "response":             primary,
+        "human_reviewed":       False,
+        "human_verdict":        None,
+    })
+
+    return jsonify(primary)
+
+
+# ─── Diagnosis QA review endpoints (internal, DEBUG_MODE only) ──────────────
+@app.route('/api/diagnose-log')
+def diagnose_log():
+    """Lets a human reviewer list recent diagnoses to spot-check the AI
+    against the real uploaded photo. Gated behind FLASK_DEBUG=1."""
+    if not DEBUG_MODE:
+        return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
+    limit = min(int(request.args.get('limit', 50)), 500)
+    entries = []
     try:
-        resp = requests.post(
-           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
-            headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}, 
-            json=body,
-            timeout=45
-        )
-        if resp.status_code == 200:
-            raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            cleaned = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if match:
-                result = json.loads(match.group())
-                if result.get("not_a_crop_image"):
-                    _NOT_A_CROP_MSG = {
-                        "en": "This doesn't look like a plant or crop photo. Please upload a clear photo of a leaf, stem, fruit, or affected part of your crop.",
-                        "hi": "यह किसी पौधे या फसल की तस्वीर जैसा नहीं लगता। कृपया अपनी फसल की पत्ती, तना, फल या प्रभावित हिस्से की स्पष्ट तस्वीर अपलोड करें।",
-                    }
-                    return jsonify({"not_a_crop_image": True, "error": _NOT_A_CROP_MSG.get(lang, _NOT_A_CROP_MSG["en"])}), 400
-                result["_lang"] = lang
-                return jsonify(result)
-        last_status, last_body = resp.status_code, resp.text[:500]
-        print(f"[Diagnose] Gemini returned {resp.status_code}: {last_body}")
-    except Exception as e:
-        last_status, last_body = "exception", str(e)
-        print(f"[Diagnose] Gemini: {e}")
+        with open(DIAGNOSIS_LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-limit:]
+        for line in reversed(lines):
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except FileNotFoundError:
+        pass
+    return jsonify({"count": len(entries), "entries": entries})
 
-    detail_msg = f" (last error: {last_status} — {last_body})" if DEBUG_MODE and last_status else ""
-    return jsonify({"error": f"Crop diagnosis is temporarily unavailable. Please try again in a moment.{detail_msg}"}), 500
+
+@app.route('/api/diagnose-log/image/<path:filename>')
+def diagnose_log_image(filename):
+    if not DEBUG_MODE:
+        return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
+    safe_name = os.path.basename(filename)
+    path = os.path.join(DIAGNOSIS_IMAGES_DIR, safe_name)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Not found"}), 404
+    return send_file(path, mimetype="image/jpeg")
+
+
+@app.route('/api/diagnose-log/review', methods=["POST"])
+def diagnose_log_review():
+    """Lets a reviewer record a verdict against a logged diagnosis by
+    rewriting its line in the JSONL file atomically."""
+    if not DEBUG_MODE:
+        return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
+    data = request.json or {}
+    record_id = data.get("id")
+    verdict = data.get("verdict")
+    if not record_id or verdict not in ("correct", "incorrect", "uncertain"):
+        return jsonify({"error": "Provide id and verdict (correct|incorrect|uncertain)"}), 400
+
+    try:
+        with _diagnosis_log_lock:
+            with open(DIAGNOSIS_LOG_PATH, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            updated = False
+            for i, line in enumerate(lines):
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("id") == record_id:
+                    rec["human_reviewed"] = True
+                    rec["human_verdict"] = verdict
+                    lines[i] = json.dumps(rec, ensure_ascii=False) + "\n"
+                    updated = True
+                    break
+            if updated:
+                with open(DIAGNOSIS_LOG_PATH + ".tmp", "w", encoding="utf-8") as f:
+                    f.writelines(lines)
+                os.replace(DIAGNOSIS_LOG_PATH + ".tmp", DIAGNOSIS_LOG_PATH)
+        return jsonify({"status": "ok" if updated else "not_found"}), (200 if updated else 404)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/diagnose-log/accuracy')
+def diagnose_log_accuracy():
+    """Computes real accuracy from whatever human verdicts have been recorded."""
+    if not DEBUG_MODE:
+        return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
+    total = reviewed = correct = 0
+    agreement_correct = agreement_total = 0
+    try:
+        with open(DIAGNOSIS_LOG_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("cached"):
+                    continue
+                total += 1
+                if rec.get("human_reviewed"):
+                    reviewed += 1
+                    is_correct = rec.get("human_verdict") == "correct"
+                    if is_correct:
+                        correct += 1
+                    if rec.get("model_agreement"):
+                        agreement_total += 1
+                        if is_correct:
+                            agreement_correct += 1
+    except FileNotFoundError:
+        pass
+
+    return jsonify({
+        "total_logged":            total,
+        "human_reviewed":          reviewed,
+        "accuracy_reviewed_only":  round(correct / reviewed, 3) if reviewed else None,
+        "agreement_case_accuracy": round(agreement_correct / agreement_total, 3) if agreement_total else None,
+        "note": "accuracy_reviewed_only is ONLY meaningful once a human has reviewed "
+                "a reasonably-sized, representative sample via /api/diagnose-log/review.",
+    })
+
 
 # ─── Alerts ──────────────────────────────────────────────────────────────────
 def _compute_alerts_for_conditions(temp, humidity, wind_speed, rain, description, date_str=None):
