@@ -1364,6 +1364,87 @@ def debug_market():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ─── Chatbot fallback (Groq down/erroring) ──────────────────────────────────
+# The frontend displays whatever string comes back here directly as the
+# bot's own chat bubble, so this needs to read as a real, helpful sentence —
+# not a raw error code — and in the farmer's own language, since Groq being
+# down also means we can't call it to translate this message on the fly.
+_CHAT_FALLBACK_MSG = {
+    "en": "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
+    "hi": "क्षमा करें, अभी मुझे जुड़ने में समस्या हो रही है। कृपया थोड़ी देर बाद फिर से प्रयास करें।",
+    "bn": "দুঃখিত, এখন সংযোগে সমস্যা হচ্ছে। অনুগ্রহ করে একটু পরে আবার চেষ্টা করুন।",
+    "te": "క్షమించండి, ప్రస్తుతం కనెక్ట్ కావడంలో సమస్య ఉంది. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
+    "mr": "क्षमस्व, सध्या कनेक्ट होण्यात अडचण येत आहे. कृपया थोड्या वेळाने पुन्हा प्रयत्न करा.",
+    "ta": "மன்னிக்கவும், தற்போது இணைப்பதில் சிக்கல் உள்ளது. சிறிது நேரம் கழித்து மீண்டும் முயற்சிக்கவும்.",
+    "gu": "માફ કરશો, અત્યારે કનેક્ટ થવામાં તકલીફ આવી રહી છે. કૃપા કરી થોડી વાર પછી ફરી પ્રયાસ કરો.",
+    "kn": "ಕ್ಷಮಿಸಿ, ಈಗ ಸಂಪರ್ಕಿಸಲು ತೊಂದರೆಯಾಗುತ್ತಿದೆ. ದಯವಿಟ್ಟು ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+    "ml": "ക്ഷമിക്കണം, ഇപ്പോൾ ബന്ധിപ്പിക്കുന്നതിൽ പ്രശ്നമുണ്ട്. ദയവായി കുറച്ച് സമയത്തിന് ശേഷം വീണ്ടും ശ്രമിക്കുക.",
+    "pa": "ਮੁਆਫ਼ ਕਰਨਾ, ਹੁਣ ਕਨੈਕਟ ਕਰਨ ਵਿੱਚ ਸਮੱਸਿਆ ਆ ਰਹੀ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।",
+    "ur": "معذرت، ابھی رابطہ کرنے میں مسئلہ ہو رہا ہے۔ براہ کرم تھوڑی دیر بعد دوبارہ کوشش کریں۔",
+}
+
+
+def _chat_fallback_reply(messages, lang):
+    """Friendly, localized reply for when Groq itself is unreachable/erroring.
+    Adds a simple keyword-based pointer to a relevant app section so the
+    farmer still gets *something* useful instead of a dead end."""
+    base = _CHAT_FALLBACK_MSG.get(lang, _CHAT_FALLBACK_MSG["en"])
+
+    last_user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_msg = (m.get("content") or "").lower()
+            break
+
+    if any(k in last_user_msg for k in ["disease", "pest", "spot", "infect", "bimari", "keet", "rog"]):
+        suggestion = " [Diagnose Crop](/diagnose)"
+    elif any(k in last_user_msg for k in ["price", "mandi", "rate", "sell", "bhav", "daam"]):
+        suggestion = " [Market Prices](/market)"
+    elif any(k in last_user_msg for k in ["weather", "rain", "temperature", "mausam", "barish"]):
+        suggestion = " [Dashboard](/)"
+    else:
+        suggestion = ""
+
+    return base + suggestion
+
+
+def _gemini_chat_reply(system_prompt, messages):
+    """Fallback for the chatbot when Groq fails — sends the exact same
+    system prompt and conversation to Gemini instead, so the farmer gets a
+    real, context-aware answer rather than a canned apology. Returns None
+    (not raises) on any failure, so the caller can fall through to the
+    final localized fallback message."""
+    if not GEMINI_API_KEY:
+        return None
+    try:
+        gemini_contents = []
+        for m in messages:
+            role = "model" if m.get("role") == "assistant" else "user"
+            content = (m.get("content") or "").strip()
+            if content:
+                gemini_contents.append({"role": role, "parts": [{"text": content}]})
+        if not gemini_contents:
+            return None
+
+        body = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": gemini_contents,
+            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 700},
+        }
+        resp = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+            headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
+            json=body, timeout=30
+        )
+        if resp.status_code == 200:
+            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return text or None
+        print(f"[Chat] Gemini fallback returned {resp.status_code}: {resp.text[:300]}")
+    except Exception as e:
+        print(f"[Chat] Gemini fallback exception: {e}")
+    return None
+
+
 @app.route("/api/chat", methods=["POST"])
 def kisan_chat():
     model = "llama-3.3-70b-versatile"   # higher free-tier token limit than gpt-oss-120b
@@ -1439,16 +1520,27 @@ LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or ques
     }
     try:
         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=30)
-        if resp.status_code == 429:
-            return jsonify({"reply": "Sorry, the assistant is a bit busy right now. Please wait a moment and try again."})
-        if resp.status_code != 200:
-            return jsonify({"error": "AI unavailable"}), 500
+        if resp.status_code == 200:
+            res_json = resp.json()
+            reply = res_json["choices"][0]["message"]["content"].strip()
+            return jsonify({"reply": reply})
 
-        res_json = resp.json()
-        reply = res_json["choices"][0]["message"]["content"].strip()
-        return jsonify({"reply": reply})
+        # Groq unavailable (rate-limited, model error, etc.) — try Gemini
+        # with the exact same prompt/context before giving up, so the
+        # farmer gets a real answer instead of a canned message whenever
+        # possible.
+        print(f"[Chat] Groq returned {resp.status_code}, trying Gemini fallback")
+        gemini_reply = _gemini_chat_reply(system_prompt, messages)
+        if gemini_reply:
+            return jsonify({"reply": gemini_reply})
+
+        return jsonify({"error": _chat_fallback_reply(messages, lang)}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"[Chat error] {e} — trying Gemini fallback")
+        gemini_reply = _gemini_chat_reply(system_prompt, messages)
+        if gemini_reply:
+            return jsonify({"reply": gemini_reply})
+        return jsonify({"error": _chat_fallback_reply(messages, lang)}), 500
 
 
 # ─── Kisan Helper — Speech-to-Text (Groq Whisper) ────────────────────────────
