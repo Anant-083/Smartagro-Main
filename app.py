@@ -355,6 +355,35 @@ def _fetch_openmeteo_forecast(lat, lon):
         return []
 
 
+@app.route("/api/debug-openmeteo")
+def debug_openmeteo():
+    """Diagnostic-only endpoint — open this URL directly in a browser to see
+    exactly what Open-Meteo returns (or what error it throws) from this
+    server, without needing to dig through Render's log viewer."""
+    lat = request.args.get("lat", "22.57")
+    lon = request.args.get("lon", "88.36")
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&daily=weathercode,temperature_2m_max,temperature_2m_min,"
+            "precipitation_sum,windspeed_10m_max,relative_humidity_2m_mean"
+            "&timezone=auto&forecast_days=16"
+        )
+        resp = requests.get(url, timeout=8)
+        raw_snippet = resp.text[:500]
+        days = _fetch_openmeteo_forecast(lat, lon)
+        return jsonify({
+            "request_url":      url,
+            "http_status":      resp.status_code,
+            "raw_response_snippet": raw_snippet,
+            "parsed_day_count": len(days),
+            "parsed_days":      days[:3],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "error_type": type(e).__name__}), 500
+
+
 @app.route("/api/weather")
 def get_weather():
     lat = request.args.get("lat")
