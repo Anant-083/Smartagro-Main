@@ -427,6 +427,9 @@ def get_weather():
         covered_dates = {d["date"] for d in openweather_days}
         extra_days = [d for d in openmeteo_days if d["date"] not in covered_dates]
         forecast_list = sorted(openweather_days + extra_days, key=lambda d: d["date"])[:16]
+        print(f"[Weather] openweather_days={len(openweather_days)} "
+              f"openmeteo_days={len(openmeteo_days)} "
+              f"merged_total={len(forecast_list)}")
 
         return jsonify({
             "current": {
