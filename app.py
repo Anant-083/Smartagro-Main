@@ -580,6 +580,8 @@ Current live weather right now: {temp} deg C, {humidity}% humidity, {rain} mm re
 
 CRITICAL INSTRUCTION: You MUST recommend EXACTLY 6 DIFFERENT crops best suited to THIS exact location's climate, soil region, and live weather. Do NOT return only 1 or 2 crops!
 
+Do NOT recommend tobacco, opium poppy, cannabis/hemp, or any other controlled, licensed-only, or health-sensitive crop, even if agronomically suited to the region — this app only recommends common food, cash, and commercial crops a general farmer can grow without special government licensing.
+
 Use your knowledge of Indian agro-climatic zones (e.g. black cotton soil across Maharashtra/Deccan, alluvial soil in the Indo-Gangetic plain, laterite soil along coastal belts, arid/sandy soil in Rajasthan, red soil in South India, etc.) to pick 6 realistic, regionally-appropriate crops, ordered from best to weakest fit for THIS location.
 
 ACCURACY RULES — read carefully:
@@ -637,6 +639,15 @@ The "crops" array must contain exactly 6 such objects, each for a different crop
         crops = parsed.get("crops")
         if not isinstance(crops, list) or not crops:
             return None
+
+        # Hard safety net — prompt instructions alone aren't 100% reliable
+        # for LLMs, so filter out any sensitive/controlled crop the AI
+        # might still suggest, rather than relying only on the prompt.
+        _BLOCKED_CROPS = ("tobacco", "opium", "poppy", "cannabis", "hemp", "marijuana", "ganja")
+        crops = [c for c in crops if not any(b in (c.get("name") or "").lower() for b in _BLOCKED_CROPS)]
+        if not crops:
+            return None
+
         for c in crops:
             c.setdefault("icon", "🌱")
             c.setdefault("location_suitability", f"Adapted to {city or 'local'} soil & region")
@@ -1457,6 +1468,25 @@ def kisan_chat():
 
     lang_name = LANG_NAMES.get(lang, "English")
 
+    # ── Hard intercept for restricted crops ──────────────────────────────────
+    # Prompt instructions alone aren't 100% reliable for LLMs, especially
+    # live in front of an audience — this check runs BEFORE calling Groq at
+    # all, so the app can never accidentally give cultivation advice for a
+    # controlled/licensed-only crop, regardless of how the AI would have
+    # responded.
+    _RESTRICTED_CROP_TERMS = ("tobacco", "opium", "poppy", "cannabis", "hemp", "marijuana", "ganja")
+    last_user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_msg = (m.get("content") or "").lower()
+            break
+    if any(term in last_user_msg for term in _RESTRICTED_CROP_TERMS):
+        _RESTRICTED_REPLY = {
+            "en": "This app focuses on common food and commercial crops and doesn't advise on tobacco, opium, cannabis/hemp, or other licensed/controlled crops. I'd be happy to suggest a suitable alternative crop for your area instead!",
+            "hi": "यह ऐप सामान्य खाद्य और वाणिज्यिक फसलों पर केंद्रित है और तंबाकू, अफीम, भांग/गांजा जैसी लाइसेंस-नियंत्रित फसलों पर सलाह नहीं देता। मैं आपके क्षेत्र के लिए एक उपयुक्त वैकल्पिक फसल सुझाने में खुशी से मदद करूंगा!",
+        }
+        return jsonify({"reply": _RESTRICTED_REPLY.get(lang, _RESTRICTED_REPLY["en"])})
+
     # ── Build location/weather context string from dashboard data ──────────────
     wx = data.get("weather_context") or {}
     location_block = ""
@@ -1508,7 +1538,9 @@ APP SECTION RULES — only suggest a section when it is DIRECTLY relevant:
 • Mention the Helpline (1800-180-1551, bottom-left button) ONLY if the user needs expert phone support.
 • For general farming questions (how to grow, fertilizer, irrigation, soil, seasons) — answer directly WITHOUT suggesting any app section unless it truly helps.
 
-LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or questions about their location — use the FARMER'S CURRENT LOCATION & WEATHER data above to give a specific, direct answer."""
+LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or questions about their location — use the FARMER'S CURRENT LOCATION & WEATHER data above to give a specific, direct answer.
+
+RESTRICTED CROPS: Never give cultivation advice, growing steps, or encouragement for tobacco, opium poppy, cannabis/hemp, or other controlled/licensed-only crops, even if agronomically asked about or technically legal with a special government license. If asked, briefly note that this app focuses on common food and commercial crops and doesn't advise on licensed/controlled crops, then offer to help with a suitable alternative crop for their location instead."""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -1622,8 +1654,12 @@ def diagnose_crop():
     else:
         lang_instruction = ""
 
-    prompt = f"""You are an expert agricultural plant pathologist AI. Look very carefully at this crop image.
-Respond ONLY with valid JSON, no markdown or backticks:
+    prompt = f"""You are an expert agricultural plant pathologist AI. Look very carefully at this image.
+
+FIRST, check: does this image actually show a plant, crop, leaf, stem, fruit, or root — something a farmer would photograph to ask about crop health? If it does NOT (e.g. it's a person, an animal, a random object, a screenshot, a blank/unclear image, or anything unrelated to plants), respond with EXACTLY this JSON and nothing else:
+{{"not_a_crop_image": true}}
+
+If it DOES show a plant/crop, respond ONLY with valid JSON, no markdown or backticks:
 {{
   "disease": "Exact disease name",
   "confidence": 88,
@@ -1673,6 +1709,12 @@ Respond ONLY with valid JSON, no markdown or backticks:
             match = re.search(r"\{.*\}", cleaned, re.DOTALL)
             if match:
                 result = json.loads(match.group())
+                if result.get("not_a_crop_image"):
+                    _NOT_A_CROP_MSG = {
+                        "en": "This doesn't look like a plant or crop photo. Please upload a clear photo of a leaf, stem, fruit, or affected part of your crop.",
+                        "hi": "यह किसी पौधे या फसल की तस्वीर जैसा नहीं लगता। कृपया अपनी फसल की पत्ती, तना, फल या प्रभावित हिस्से की स्पष्ट तस्वीर अपलोड करें।",
+                    }
+                    return jsonify({"not_a_crop_image": True, "error": _NOT_A_CROP_MSG.get(lang, _NOT_A_CROP_MSG["en"])}), 400
                 result["_lang"] = lang
                 return jsonify(result)
         last_status, last_body = resp.status_code, resp.text[:500]
