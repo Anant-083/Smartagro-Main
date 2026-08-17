@@ -584,8 +584,27 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
     return voice || null;
   }
 
-  function cleanTextForSpeech(text) {
-    return text
+  // Spoken "to" word for number ranges like "5-6", per language — used so
+  // TTS reads it as "5 to 6" instead of "5 minus 6". English already reads
+  // a bare hyphen correctly, so this only applies to other languages.
+  const RANGE_WORD = {
+    hi: 'से', mai: 'से', sat: 'से', sd: 'से', bodo: 'से', doi: 'से', sa: 'से',
+    bn: 'থেকে', mni: 'থেকে',
+    te: 'నుండి',
+    mr: 'ते', kok: 'ते',
+    ta: 'முதல்',
+    gu: 'થી',
+    kn: 'ರಿಂದ',
+    ml: 'മുതൽ',
+    pa: 'ਤੋਂ',
+    or: 'ରୁ',
+    as: 'পৰা',
+    ur: 'سے', ks: 'سے',
+    ne: 'देखि',
+  };
+
+  function cleanTextForSpeech(text, lang) {
+    let out = text
       .replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
       .replace(/[\u{2600}-\u{27FF}]/gu, '')
       .replace(/[\u{FE00}-\u{FEFF}]/gu, '')
@@ -594,9 +613,16 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
       .replace(/[►▶→←↑↓]/g, '')
       .replace(/\*\*/g, '')
       .replace(/\*/g, '')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/\s+/g, ' ')
-      .trim();
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+    // Fix number ranges (e.g. "5-6", "10-15 kg") so non-English TTS voices
+    // don't read the hyphen as "minus".
+    const rangeWord = lang && lang !== 'en' ? RANGE_WORD[lang] : null;
+    if (rangeWord) {
+      out = out.replace(/(\d+)\s*-\s*(\d+)/g, `$1 ${rangeWord} $2`);
+    }
+
+    return out.replace(/\s+/g, ' ').trim();
   }
 
   function showKisanToast(msg, type, duration) {
@@ -950,10 +976,10 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
     if (activeTyper) activeTyper.finish();
 
     const rawText = div.dataset.text || '';
-    const text    = cleanTextForSpeech(rawText);
+    const lang    = getAppLang();
+    const text    = cleanTextForSpeech(rawText, lang);
     if (!text || !window.speechSynthesis) return;
 
-    const lang       = getAppLang();
     const voice      = getBestVoice(lang);
     const speechLang = VOICE_LANGS[lang] || 'en-IN';
 
