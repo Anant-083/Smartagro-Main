@@ -315,9 +315,27 @@ def _openmeteo_wmo_info(code):
     return desc, icon_base + "d"
 
 
+# Simple in-memory cache for Open-Meteo forecasts, keyed by location rounded
+# to ~1km precision. Open-Meteo's free tier has a daily request quota that's
+# shared across everyone on the same hosting IP (common on free-tier hosts
+# like Render), so caching is essential — without it, every single page
+# load/navigation was making a fresh call and exhausting the quota fast.
+_openmeteo_cache = {}
+_OPENMETEO_CACHE_TTL = 6 * 3600  # 6 hours — forecasts don't change that fast
+
+
 def _fetch_openmeteo_forecast(lat, lon):
     """Real daily forecast (up to 16 days) from Open-Meteo. Returns [] on any
     failure — callers must treat a missing day as unavailable, never guess."""
+    try:
+        lat_f, lon_f = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return []
+    cache_key = (round(lat_f, 2), round(lon_f, 2))
+    cached = _openmeteo_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _OPENMETEO_CACHE_TTL:
+        return cached["days"]
+
     try:
         url = (
             "https://api.open-meteo.com/v1/forecast"
@@ -328,7 +346,11 @@ def _fetch_openmeteo_forecast(lat, lon):
         )
         resp = requests.get(url, timeout=8)
         if resp.status_code != 200:
-            return []
+            # Rate-limited or otherwise failing — serve stale cached data if
+            # we have any rather than nothing, since a forecast from a few
+            # hours ago is still far more useful than no data at all.
+            print(f"[Open-Meteo] non-200 status {resp.status_code}: {resp.text[:200]}")
+            return cached["days"] if cached else []
         daily = resp.json().get("daily", {})
         dates = daily.get("time", [])
         out = []
@@ -349,10 +371,11 @@ def _fetch_openmeteo_forecast(lat, lon):
                 })
             except (IndexError, KeyError, TypeError):
                 continue
+        _openmeteo_cache[cache_key] = {"ts": time.time(), "days": out}
         return out
     except Exception as e:
         print(f"[Open-Meteo error] {e}")
-        return []
+        return cached["days"] if cached else []
 
 
 @app.route("/api/debug-openmeteo")
