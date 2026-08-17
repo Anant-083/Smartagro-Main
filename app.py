@@ -612,7 +612,7 @@ The "crops" array must contain exactly 6 such objects, each for a different crop
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
-        "model":       "llama-3.1-8b-instant",
+        "model":       "openai/gpt-oss-20b",
         "messages":    [{"role": "user", "content": prompt}],
         "temperature": 0.4,
         "max_tokens":  3500,
@@ -1447,7 +1447,7 @@ def _gemini_chat_reply(system_prompt, messages):
 
 @app.route("/api/chat", methods=["POST"])
 def kisan_chat():
-    model = "llama-3.3-70b-versatile"   # higher free-tier token limit than gpt-oss-120b
+    model = "openai/gpt-oss-120b"   # replaces deprecated llama-3.3-70b-versatile (shut down 08/16/26)
 
     data = request.json or {}
     messages = data.get("messages", [])
@@ -1823,7 +1823,7 @@ Respond ONLY with a JSON object, no markdown, no backticks:
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
-        "model":       "llama-3.1-8b-instant",
+        "model":       "openai/gpt-oss-20b",
         "messages":    [{"role": "user", "content": prompt}],
         "temperature": 0.4,
         "max_tokens":  3500,
@@ -1908,7 +1908,7 @@ Respond ONLY with valid JSON:
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
-        "model":       "llama-3.1-8b-instant",
+        "model":       "openai/gpt-oss-20b",
         "messages":    [{"role": "user", "content": prompt}],
         "temperature": 0.5,
         "max_tokens":  7000,
@@ -2158,9 +2158,9 @@ def crop_risk():
 
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 TRANSLATE_MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct",   # primary: fast & multilingual
-    "llama-3.1-8b-instant",                         # fallback 1: very fast, lightweight
-    "llama-3.3-70b-versatile",                      # fallback 2: high quality
+    "openai/gpt-oss-120b",   # primary: fast & multilingual
+    "openai/gpt-oss-20b",    # fallback 1: very fast, lightweight
+    "qwen/qwen3.6-27b",      # fallback 2: genuinely different model, not just a repeat of primary
 ]
 TRANSLATE_CHUNK_SIZE = 40   
 TRANSLATE_MAX_WORKERS = 4  
