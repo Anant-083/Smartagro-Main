@@ -32,7 +32,7 @@
     <a href="/alerts" class="nav-item" data-translate="nav_alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
   </div>
   <div class="nav-actions">
-    <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme">
+    <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme" data-translate-title="theme_toggle_title">
     <i class="fas fa-moon" id="themeIcon"></i>
     </button>
     <div class="lang-selector" id="langSelector">
@@ -40,12 +40,12 @@
         <i class="fas fa-globe"></i><span id="currentLang">EN</span><i class="fas fa-chevron-down"></i>
       </button>
       <div class="lang-dropdown" id="langDropdown">
-        <div class="lang-search"><input type="text" placeholder="Search language..." id="langSearch"/></div>
+        <div class="lang-search"><input type="text" placeholder="Search language..." id="langSearch" data-translate-placeholder="lang_search_placeholder"/></div>
         <div class="lang-list" id="langList"></div>
       </div>
     </div>
     <button class="install-btn" id="installBtn" title="Install SmartAgro App">
-      <i class="fas fa-download"></i><span>Install App</span>
+      <i class="fas fa-download"></i><span data-translate="btn_install">Install App</span>
     </button>
     <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
   </div>
@@ -59,8 +59,8 @@
     <div class="hero-orb orb-3"></div>
   </div>
   <div class="page-hero-content">
-    <div class="hero-badge"><i class="fas fa-chart-line"></i> Live Mandi Intelligence</div>
-    <h1><span class="gradient-text">Crop Market Prices</span></h1>
+    <div class="hero-badge"><i class="fas fa-chart-line"></i> <span data-translate="market_hero_badge">Live Mandi Intelligence</span></div>
+    <h1><span class="gradient-text" data-translate="market_hero_title">Crop Market Prices</span></h1>
     <p data-translate="market_subtitle">Real-time mandi prices across 10+ Indian cities — updated daily</p>
   </div>
   <!-- Live ticker -->
@@ -79,7 +79,7 @@
       <div class="search-box">
         <i class="fas fa-search"></i>
         <!-- Fixed: Synced id to match market.js search queries -->
-        <input type="text" id="locationSearch" placeholder="Search city (e.g. Delhi, Mumbai, Kolkata...)"/>
+        <input type="text" id="locationSearch" placeholder="Search city (e.g. Delhi, Mumbai, Kolkata...)" data-translate-placeholder="market_search_placeholder"/>
         <button class="search-btn" onclick="searchLocation()" data-translate="btn_search">Search</button>
         <button class="clear-btn" id="clearSearchBtn" onclick="clearSearch()" style="display:none">
           <i class="fas fa-times"></i>
@@ -183,8 +183,8 @@
         </div>
         <div class="chart-city-select" style="display:flex;gap:8px;align-items:center;">
           <select id="chartCropScope" onchange="updateChart()" title="Trend Crop Selection">
-            <option value="top">Top Major Crops</option>
-            <option value="all">All Commodities</option>
+            <option value="top" data-translate="opt_top_crops">Top Major Crops</option>
+            <option value="all" data-translate="opt_all_commodities">All Commodities</option>
           </select>
           <select id="chartCitySelect" onchange="updateChart()">
   <option value="Delhi">Delhi</option>
@@ -253,7 +253,7 @@
 <!-- ═══════════════════════ FOOTER ═══════════════════════ -->
 <footer class="footer">
   <div class="disclaimer-container">
-    <p><small><strong>⚠️ Disclaimer:</strong> SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.</small></p>
+    <p><small><strong data-translate="disclaimer_label">⚠️ Disclaimer:</strong> <span data-translate="disclaimer_text">SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.</span></small></p>
   </div>
   <div class="container">
     <div class="footer-brand">
@@ -261,16 +261,16 @@
       <span>Smart<span class="brand-accent">Agro</span></span>
     </div>
     <p data-translate="footer_text">Empowering farmers with AI-driven precision agriculture</p>
-    <p class="footer-copy">© 2026 SmartAgro. Built for India's farmers.</p>
+    <p class="footer-copy" data-translate="footer_copy">© 2026 SmartAgro. Built for India's farmers.</p>
   </div>
 </footer>
 
 <div class="toast" id="toast"></div>
 <nav id="mobileBottomNav">
-  <a href="/"><i class="fas fa-home"></i><span>Home</span></a>
-  <a href="/diagnose"><i class="fas fa-microscope"></i><span>Diagnose</span></a>
-  <a href="/market" class="active"><i class="fas fa-chart-line"></i><span>Mandi Prices</span></a>
-  <a href="/alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+  <a href="/"><i class="fas fa-home"></i><span data-translate="nav_dashboard">Home</span></a>
+  <a href="/diagnose"><i class="fas fa-microscope"></i><span data-translate="nav_diagnose">Diagnose</span></a>
+  <a href="/market" class="active"><i class="fas fa-chart-line"></i><span data-translate="nav_market">Mandi Prices</span></a>
+  <a href="/alerts"><i class="fas fa-bell"></i><span data-translate="nav_alerts">Alerts</span></a>
 </nav>
 
 <script src="/static/js/translations.js?v={{ build_version }}" defer></script>
