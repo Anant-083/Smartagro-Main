@@ -564,6 +564,7 @@ def _openmeteo_wmo_info(code):
 # like Render), so caching is essential — without it, every single page
 # load/navigation was making a fresh call and exhausting the quota fast.
 _openmeteo_cache = {}
+_openmeteo_rate_limited_until = 0  # monotonic timestamp; skip calls until this passes
 _OPENMETEO_CACHE_TTL = 6 * 3600  # 6 hours — forecasts don't change that fast
 
 
@@ -574,10 +575,22 @@ def _fetch_openmeteo_forecast(lat, lon):
         lat_f, lon_f = float(lat), float(lon)
     except (TypeError, ValueError):
         return []
-    cache_key = (round(lat_f, 2), round(lon_f, 2))
+    # Rounded to 1 decimal (~11km) rather than 2 (~1.1km) so nearby farmers
+    # share the same cache entry — this matters a lot on the free tier,
+    # since every distinct rounded coordinate burns a separate call against
+    # Open-Meteo's daily quota. Precision at this level is still far tighter
+    # than a day-level forecast actually varies over 11km.
+    cache_key = (round(lat_f, 1), round(lon_f, 1))
     cached = _openmeteo_cache.get(cache_key)
     if cached and (time.time() - cached["ts"]) < _OPENMETEO_CACHE_TTL:
         return cached["days"]
+
+    # Already know we're rate-limited for today — don't waste a call
+    # confirming that again, just serve whatever's cached (even if stale)
+    # or give up honestly.
+    global _openmeteo_rate_limited_until
+    if time.monotonic() < _openmeteo_rate_limited_until:
+        return cached["days"] if cached else []
 
     try:
         url = (
@@ -588,10 +601,17 @@ def _fetch_openmeteo_forecast(lat, lon):
             "&timezone=auto&forecast_days=16"
         )
         resp = requests.get(url, timeout=8)
+        if resp.status_code == 429:
+            # Daily quota genuinely exhausted — stop retrying for a few
+            # hours instead of burning more of tomorrow's quota re-checking
+            # a limit we already know is hit.
+            _openmeteo_rate_limited_until = time.monotonic() + 3 * 3600
+            logger.warning(f"[Open-Meteo] 429 rate limited — pausing calls for 3h. {resp.text[:200]}")
+            return cached["days"] if cached else []
         if resp.status_code != 200:
-            # Rate-limited or otherwise failing — serve stale cached data if
-            # we have any rather than nothing, since a forecast from a few
-            # hours ago is still far more useful than no data at all.
+            # Other failure — serve stale cached data if we have any rather
+            # than nothing, since a forecast from a few hours ago is still
+            # far more useful than no data at all.
             logger.info(f"[Open-Meteo] non-200 status {resp.status_code}: {resp.text[:200]}")
             return cached["days"] if cached else []
         daily = resp.json().get("daily", {})
@@ -1834,12 +1854,28 @@ def _geocode_city(name):
 # Matches "in Lucknow", "at Pune", "near Nashik", "for Indore" etc. so the
 # gateway can tell WHICH city a message is actually asking about, instead
 # of always assuming the farmer's current dashboard location.
-_CHAT_LOCATION_RX = re.compile(r"\b(?:in|at|near|for)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b")
+_CHAT_LOCATION_RX = re.compile(
+    r"\b(?:in|at|near|for)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})\b", re.IGNORECASE
+)
+# Common words that follow "in/at/near/for" without naming a place
+# ("in the morning", "for me", "near here") — reject these so they don't
+# get treated as a city name and geocoded.
+_CHAT_LOCATION_STOPWORDS = {
+    "the", "my", "our", "your", "this", "that", "these", "those", "here",
+    "there", "me", "us", "today", "tomorrow", "morning", "evening", "night",
+    "future", "general", "case", "some", "any", "field", "farm",
+}
 
 
 def _chat_detect_city(text: str):
     m = _CHAT_LOCATION_RX.search(text or "")
-    return m.group(1).strip() if m else None
+    if not m:
+        return None
+    candidate = m.group(1).strip()
+    first_word = candidate.split()[0].lower()
+    if first_word in _CHAT_LOCATION_STOPWORDS:
+        return None
+    return candidate
 
 
 # Common crop name -> aliases (English + Hindi transliteration + regional
@@ -1978,7 +2014,7 @@ def _chat_fetch_market_rows(state, commodity=None):
 
     if commodity:
         filtered = [r for r in rows
-                    if commodity.lower() in str(r.get("commodity", r.get("Commodity", ""))).lower()]
+                    if commodity.lower() in str(r.get("crop", "")).lower()]
         if filtered:
             rows = filtered
 
@@ -2048,7 +2084,7 @@ def _chat_run_gateway(intents, context_data, message_text=""):
         res = _chat_market_tool(state, commodity)
         if res.get("ok"):
             lines = "; ".join(
-                f"{r.get('commodity', r.get('Commodity', '?'))}: ₹{r.get('modal_price', r.get('Modal_Price', '?'))}/quintal"
+                f"{r.get('crop', '?')}: ₹{r.get('price', '?')}/quintal"
                 for r in res["rows"]
             )
             sections.append(f"[LIVE MANDI PRICES for {state}] {lines}")
