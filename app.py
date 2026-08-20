@@ -2075,7 +2075,18 @@ def _chat_run_gateway(intents, context_data, message_text=""):
     # standing.
     named_city = _chat_detect_city(message_text)
     commodity = _chat_detect_commodity(message_text)
-    state = named_city or context_data.get("state") or city
+
+    # For the market tool specifically: Agmarknet's API filters by STATE
+    # name, not city. "Lucknow" would silently return zero records — it
+    # needs to resolve to "Uttar Pradesh" first. Open-Meteo's geocoding
+    # response includes admin1 (the state) alongside lat/lon, so reuse
+    # that instead of passing the raw city name straight through.
+    named_state = None
+    if named_city:
+        geo = _geocode_city(named_city)
+        if geo and geo.get("state"):
+            named_state = geo["state"]
+    state = named_state or context_data.get("state") or city
 
     sections = []
     summaries = []
@@ -2567,9 +2578,9 @@ def diagnose_crop():
     is_plant, reject_reason = ai_is_crop_image(image_b64)
     if not is_plant:
         return jsonify({
-            "error": "not_a_crop_image",
-            "message": reject_reason or "This doesn't look like a photo of a plant or crop. "
-                       "Please upload a clear photo of the affected leaf, stem, fruit, or root.",
+            "not_a_crop_image": True,
+            "error": reject_reason or "This doesn't look like a photo of a plant or crop. "
+                     "Please upload a clear photo of the affected leaf, stem, fruit, or root.",
         }), 422
 
     lang_name = LANG_NAMES.get(lang, "")
