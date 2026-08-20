@@ -18,11 +18,21 @@
 <body>
   <div>
     <div class="offline-icon">🌾</div>
-    <h1>You're Offline</h1>
-    <p>No internet connection. Please check your network and try again.</p>
+    <h1 data-translate="offline_title">You're Offline</h1>
+    <p data-translate="offline_message">No internet connection. Please check your network and try again.</p>
     <button class="btn-primary" onclick="window.location.reload()">
-      🔄 Try Again
+      🔄 <span data-translate="offline_retry">Try Again</span>
     </button>
   </div>
+  <script src="/static/js/translations.js?v={{ build_version }}"></script>
+  <script>
+    // The service worker precaches translations.js specifically so this
+    // page can still show the farmer's chosen language while genuinely
+    // offline — previously this page ignored the language setting
+    // entirely and always showed English.
+    document.addEventListener('DOMContentLoaded', function () {
+      if (typeof applyTranslations === 'function') applyTranslations();
+    });
+  </script>
 </body>
 </html>
