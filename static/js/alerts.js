@@ -1260,28 +1260,29 @@ async function loadMonthlyAlerts() {
         const data = await res.json();
         const monthly = data.monthly || [];
 
+        // Only render days with real, fetched data. Days beyond real
+        // forecast coverage used to render as a separate "No data" /
+        // "unavailable" placeholder card — that's honest (never fakes a
+        // risk %) but clutters the calendar with empty-looking tiles for
+        // the back half of the month. Simplest fix: just don't render
+        // those tiles at all, so the calendar only ever shows real days.
+        const availableDays = monthly.filter(d => d.data_available !== false && d.risk !== 'unavailable');
+
         const cal = document.getElementById('monthlyCalendar');
-        cal.innerHTML = monthly.map(d => {
+
+        if (availableDays.length === 0) {
+            cal.innerHTML = `<div class="cal-empty-state" style="grid-column:1/-1;text-align:center;padding:24px;color:var(--text-3)">
+                <i class="fas fa-cloud-question" style="font-size:1.6rem;display:block;margin-bottom:8px"></i>
+                No forecast data available yet.
+            </div>`;
+            monthlyLoaded = true;
+            return;
+        }
+
+        cal.innerHTML = availableDays.map(d => {
             const dateObj = new Date(d.date);
             const dayNum = dateObj.getDate();
             const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
-            
-            // Days beyond real forecast coverage (OpenWeather + Open-Meteo
-            // combined give real data for roughly the first 16 days) have no
-            // actual data — the backend honestly marks these as
-            // risk: "unavailable" / risk_pct: null rather than guessing.
-            // Render that state as its own distinct "no data" card instead
-            // of silently falling through to a fake "Safe, 0%" — that would
-            // misrepresent unmeasured days as verified-safe ones.
-            if (d.risk === 'unavailable' || d.data_available === false) {
-                return `
-                <div class="cal-day cal-unavailable" title="No forecast data available this far out yet">
-                    <div class="cal-date">${dayName} <strong>${dayNum}</strong></div>
-                    <div class="cal-icon"><i class="fas fa-circle-question" style="color:var(--text-3)"></i><span style="color:var(--text-3)">No data</span></div>
-                    <div style="font-size: 0.72rem; font-weight: 700; text-align: center; margin-top: 6px; color: var(--text-3)">Beyond forecast range</div>
-                    <ul class="cal-alerts-text"><li>Check back closer to this date</li></ul>
-                </div>`;
-            }
 
             let bgClass = 'cal-safe';
             let icon = '<i class="fas fa-check-circle" style="color:var(--green)"></i><span>Safe</span>';
