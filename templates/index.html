@@ -44,7 +44,7 @@
       <i class="fas fa-chart-line"></i><span>Market Prices</span>
     </a>
     <a href="/alerts" class="nav-item" data-translate="nav_alerts">
-      <i class="fas fa-bell"></i><span>Alerts</span>
+      <i class="fas fa-bell"></i><span data-translate="nav_alerts">Alerts</span>
       <span class="alert-badge" id="alertBadge">0</span>
     </a>
   </div>
@@ -66,7 +66,7 @@
     </div>
     <!-- Hamburger -->
     <button class="install-btn" id="installBtn" title="Install SmartAgro App">
-      <i class="fas fa-download"></i><span>Install App</span>
+      <i class="fas fa-download"></i><span data-translate="btn_install">Install App</span>
     </button>
     <button class="hamburger" id="hamburger" aria-label="Menu">
       <span></span><span></span><span></span>
@@ -105,22 +105,22 @@
   </div>
   <div class="hero-visual">
     <div class="weather-card-hero" id="heroWeatherCard">
-      <div class="hwc-loading"><i class="fas fa-location-dot fa-pulse"></i><span>Awaiting location...</span></div>
+      <div class="hwc-loading"><i class="fas fa-location-dot fa-pulse"></i><span data-translate="awaiting_location">Awaiting location...</span></div>
     </div>
     
     <!-- Quick Jump Buttons -->
     <div class="quick-jump-bar" id="quickJumpBarDashboard">
       <a href="#weatherSection" class="quick-jump-btn" onclick="return smoothJump('weatherSection')" style="border-color: rgba(56,189,248,0.35);" title="Click to view Current Weather Conditions">
-        <i class="fas fa-cloud-sun-rain" style="color: #38bdf8;"></i> <span>Current Weather Conditions</span>
+        <i class="fas fa-cloud-sun-rain" style="color: #38bdf8;"></i> <span data-translate="section_weather">Current Weather Conditions</span>
       </a>
       <a href="#locationMapSection" class="quick-jump-btn" onclick="return smoothJump('locationMapSection')" style="border-color: rgba(167,139,250,0.35);" title="Click to view Satellite View & Vegetation Health">
-        <i class="fas fa-satellite" style="color: #a78bfa;"></i> <span>Satellite View & Vegetation Health</span>
+        <i class="fas fa-satellite" style="color: #a78bfa;"></i> <span data-translate="quick_jump_satellite">Satellite View & Vegetation Health</span>
       </a>
       <a href="#cropSection" class="quick-jump-btn" onclick="return smoothJump('cropSection')" style="border-color: rgba(74,222,128,0.35);" title="Click to view Crop Recommendations">
-        <i class="fas fa-seedling" style="color: #4ade80;"></i> <span>Crop Recommendations</span>
+        <i class="fas fa-seedling" style="color: #4ade80;"></i> <span data-translate="quick_jump_crop_recs">Crop Recommendations</span>
       </a>
       <a href="#advisorySection" class="quick-jump-btn" onclick="return smoothJump('advisorySection')" style="border-color: rgba(251,191,36,0.35);" title="Click to view Crop Advisory Calendar">
-        <i class="fas fa-calendar-days" style="color: #fbbf24;"></i> <span>Crop Advisory Calendar</span>
+        <i class="fas fa-calendar-days" style="color: #fbbf24;"></i> <span data-translate="quick_jump_advisory_calendar">Crop Advisory Calendar</span>
       </a>
     </div>
   </div>
@@ -264,7 +264,7 @@
       <span>Smart<span class="brand-accent">Agro</span></span>
   </div>
     <p data-translate="footer_text">Empowering farmers with AI-driven precision agriculture</p>
-    <p class="footer-copy">© 2026 SmartAgro. Built for India's farmers.</p>
+    <p class="footer-copy" data-translate="footer_copy">© 2026 SmartAgro. Built for India's farmers.</p>
   </div>
 </footer>
 
@@ -273,10 +273,10 @@
 
 <!-- Mobile Bottom Nav -->
 <nav id="mobileBottomNav">
-  <a href="/" class="active"><i class="fas fa-home"></i><span>Home</span></a>
-  <a href="/diagnose"><i class="fas fa-microscope"></i><span>Diagnose</span></a>
-  <a href="/market"><i class="fas fa-chart-line"></i><span>Mandi Prices</span></a>
-  <a href="/alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+  <a href="/" class="active"><i class="fas fa-home"></i><span data-translate="nav_home_short">Home</span></a>
+  <a href="/diagnose"><i class="fas fa-microscope"></i><span data-translate="nav_diagnose_short">Diagnose</span></a>
+  <a href="/market"><i class="fas fa-chart-line"></i><span data-translate="nav_market_short">Mandi Prices</span></a>
+  <a href="/alerts"><i class="fas fa-bell"></i><span data-translate="nav_alerts">Alerts</span></a>
 </nav>
 
 <script src="/static/js/translations.js?v={{ build_version }}" defer></script>
