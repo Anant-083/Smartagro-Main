@@ -1106,6 +1106,25 @@ _agmark_session.mount("https://", requests.adapters.HTTPAdapter(max_retries=_agm
 
 # Agmarknet's commodity names vs. the display names SmartAgro already uses
 # in the UI/translations. Extend this as you add more crops.
+# Agmarknet's dataset technically also covers livestock/animal categories
+# (Ox, Bullock, Goat, Poultry, Egg, Wool, Milk, etc.) alongside actual
+# crops — it's an "agricultural markets" feed, not a crops-only one. This
+# app is a crop advisory tool, so those don't belong on the Market Prices
+# page. Filtered by whole-word match (not substring) so real crops that
+# happen to contain an animal word as part of a longer name — "Cowpea",
+# "Eggplant" — are never accidentally excluded.
+_NON_CROP_COMMODITY_RX = re.compile(
+    r"\b(ox|oxen|bullock|bull|cow|buffalo|goat|sheep|pig|poultry|chicken|"
+    r"broiler|hen|egg|eggs|wool|milk|ghee|fish|prawn|cattle|livestock|"
+    r"hide|skin|manure|dung|calf|lamb|mutton|meat)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_crop_commodity(raw_name: str) -> bool:
+    return not _NON_CROP_COMMODITY_RX.search(raw_name or "")
+
+
 AGMARK_COMMODITY_ALIASES = {
     "wheat": "Wheat", "rice": "Rice", "maize": "Maize (Corn)",
     "mustard": "Mustard", "groundnut": "Groundnut", "onion": "Onion",
@@ -1349,6 +1368,8 @@ def fetch_agmarknet_prices(state: str) -> list:
 
     for r in records:
         raw_name = str(_field(r, "commodity", "Commodity") or "").strip()
+        if not _is_crop_commodity(raw_name):
+            continue
         modal = _field(r, "modal_price", "Modal_x0020_Price", "Modal Price", "modal price")
         if not raw_name or modal is None:
             skipped_no_price += 1
@@ -1804,7 +1825,8 @@ def _off_topic_reply(lang: str) -> str:
 # appended to the reply directly, so the farmer is guaranteed to see the
 # real numbers even if the model's wording glosses over them.
 _CHAT_INTENT_KEYWORDS = {
-    "market":   ["price", "mandi", "rate", "sell", "bhav", "daam", "market", "kharid"],
+    "market":   ["price", "mandi", "rate", "sell", "bhav", "bhaav", "daam", "dam",
+                 "keemat", "kimat", "mulya", "market", "kharid"],
     "crops":    ["what to grow", "which crop", "recommend crop", "suggest crop",
                  "what should i plant", "which seed", "best crop"],
     "seasonal": ["season", "calendar", "when to sow", "when to plant", "monsoon prep",
