@@ -34,6 +34,37 @@ const T = {
         step_upload: 'Upload or capture image',
         step_click: 'Click Analyze Crop',
         step_result: 'Get instant AI diagnosis',
+        offline_title: "You're Offline",
+        offline_message: 'No internet connection. Please check your network and try again.',
+        offline_retry: 'Try Again',
+        market_hero_badge: 'Live Mandi Intelligence',
+        market_hero_title: 'Crop Market Prices',
+        market_search_placeholder: 'Search city (e.g. Delhi, Mumbai, Kolkata...)',
+        theme_toggle_title: 'Toggle day/night theme',
+        lang_search_placeholder: 'Search language...',
+        btn_install: 'Install App',
+        opt_top_crops: 'Top Major Crops',
+        opt_all_commodities: 'All Commodities',
+        disclaimer_label: '⚠️ Disclaimer:',
+        disclaimer_text: 'SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.',
+        footer_copy: "© 2026 SmartAgro. Built for India's farmers.",
+        nav_home_short: 'Home',
+        nav_diagnose_short: 'Diagnose',
+        nav_market_short: 'Mandi Prices',
+        quick_jump_risk_overview: 'Risk Level Overview',
+        quick_jump_crop_risk: 'Crop Risk Forecast',
+        best_harvest_day: 'Best Harvest Day',
+        analyzing_safe_windows: 'Analyzing safe windows...',
+        month_risk_outlook: "This Month's Risk Outlook",
+        month_risk_outlook_sub: 'Real forecast trend for the rest of this month',
+        analyzing_30day_trends: 'Analyzing 30-day trends...',
+        seasonal_alerts_title: 'Seasonal Alerts',
+        seasonal_alerts_sub: 'Overall advisories for the current season',
+        generating_seasonal_advisory: 'Generating seasonal advisory...',
+        awaiting_location: 'Awaiting location...',
+        quick_jump_satellite: 'Satellite View & Vegetation Health',
+        quick_jump_crop_recs: 'Crop Recommendations',
+        quick_jump_advisory_calendar: 'Crop Advisory Calendar',
         nav_dashboard: 'Dashboard',
         nav_diagnose: 'Diagnose Crop',
         nav_market: 'Market Prices',
@@ -2320,6 +2351,9 @@ function applyTranslations() {
     document.querySelectorAll('[data-translate-placeholder]').forEach(el => {
         el.placeholder = translate(el.getAttribute('data-translate-placeholder'));
     });
+    document.querySelectorAll('[data-translate-title]').forEach(el => {
+        el.title = translate(el.getAttribute('data-translate-title'));
+    });
     document.documentElement.lang = currentLang;
 }
 
@@ -2580,4 +2614,4 @@ document.addEventListener('DOMContentLoaded', () => {
     if (searchEl) {
         searchEl.addEventListener('input', e => buildLangList(e.target.value));
     }
-});
+});
