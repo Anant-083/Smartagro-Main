@@ -1,0 +1,29 @@
+# ── Secrets ──────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Runtime state (regenerated on every boot / request; should not be
+#    committed — was previously tracked and caused noisy diffs on every
+#    deploy) ───────────────────────────────────────────────────────────────
+api_usage_tracker.json
+market_history_cache.json
+*.log
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+
+# ── OS / editor cruft ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
