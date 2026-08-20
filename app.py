@@ -1804,8 +1804,7 @@ def _off_topic_reply(lang: str) -> str:
 # appended to the reply directly, so the farmer is guaranteed to see the
 # real numbers even if the model's wording glosses over them.
 _CHAT_INTENT_KEYWORDS = {
-    "market":   ["price", "mandi", "rate", "sell", "bhav", "bhaav", "daam", "dam",
-                 "keemat", "kimat", "mulya", "market", "kharid"],
+    "market":   ["price", "mandi", "rate", "sell", "bhav", "daam", "market", "kharid"],
     "crops":    ["what to grow", "which crop", "recommend crop", "suggest crop",
                  "what should i plant", "which seed", "best crop"],
     "seasonal": ["season", "calendar", "when to sow", "when to plant", "monsoon prep",
@@ -1858,35 +1857,25 @@ def _geocode_city(name):
 _CHAT_LOCATION_RX = re.compile(
     r"\b(?:in|at|near|for)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})\b", re.IGNORECASE
 )
-# Hinglish puts the location BEFORE the postposition ("Patna mein" = "in
-# Patna", "Delhi me" = "in Delhi") instead of before it like English does.
-# Without this, any message typed in Hinglish word order never matches a
-# city at all, no matter how the English pattern above is tuned.
-_CHAT_LOCATION_RX_HI = re.compile(
-    r"\b([a-zA-Z]+)\s+(?:mein|me|main)\b", re.IGNORECASE
-)
-# Common words that follow "in/at/near/for" (or precede "mein/me") without
-# naming a place ("in the morning", "for me", "aaj mein" [in today]) —
-# reject these so they don't get treated as a city name and geocoded.
+# Common words that follow "in/at/near/for" without naming a place
+# ("in the morning", "for me", "near here") — reject these so they don't
+# get treated as a city name and geocoded.
 _CHAT_LOCATION_STOPWORDS = {
     "the", "my", "our", "your", "this", "that", "these", "those", "here",
     "there", "me", "us", "today", "tomorrow", "morning", "evening", "night",
     "future", "general", "case", "some", "any", "field", "farm",
-    "aaj", "kal", "abhi", "yaha", "yahan", "wahan", "iska", "uska",
 }
 
 
 def _chat_detect_city(text: str):
-    for rx in (_CHAT_LOCATION_RX, _CHAT_LOCATION_RX_HI):
-        m = rx.search(text or "")
-        if not m:
-            continue
-        candidate = m.group(1).strip()
-        first_word = candidate.split()[0].lower()
-        if first_word in _CHAT_LOCATION_STOPWORDS:
-            continue
-        return candidate
-    return None
+    m = _CHAT_LOCATION_RX.search(text or "")
+    if not m:
+        return None
+    candidate = m.group(1).strip()
+    first_word = candidate.split()[0].lower()
+    if first_word in _CHAT_LOCATION_STOPWORDS:
+        return None
+    return candidate
 
 
 # Common crop name -> aliases (English + Hindi transliteration + regional
