@@ -29,7 +29,7 @@
     <a href="/" class="nav-item" data-translate="nav_dashboard"><i class="fas fa-th-large"></i><span>Dashboard</span></a>
     <a href="/diagnose" class="nav-item active" data-translate="nav_diagnose"><i class="fas fa-microscope"></i><span>Diagnose Crop</span></a>
     <a href="/market" class="nav-item" data-translate="nav_market"><i class="fas fa-chart-line"></i><span>Market Prices</span></a>
-    <a href="/alerts" class="nav-item" data-translate="nav_alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+    <a href="/alerts" class="nav-item" data-translate="nav_alerts"><i class="fas fa-bell"></i><span data-translate="nav_alerts">Alerts</span></a>
   </div>
   <div class="nav-actions">
     <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme">
@@ -43,7 +43,7 @@
       </div>
     </div>
     <button class="install-btn" id="installBtn" title="Install SmartAgro App">
-      <i class="fas fa-download"></i><span>Install App</span>
+      <i class="fas fa-download"></i><span data-translate="btn_install">Install App</span>
     </button>
     <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
   </div>
@@ -194,17 +194,17 @@
       <div class="brand-icon small"><i class="fas fa-seedling"></i></div>
       <span>Smart<span class="brand-accent">Agro</span></span>
     </div>
-    <p class="footer-copy">© 2026 SmartAgro. Built for India's farmers.</p>
+    <p class="footer-copy" data-translate="footer_copy">© 2026 SmartAgro. Built for India's farmers.</p>
   </div>
 </footer>
 
 <div class="toast" id="toast"></div>
 
 <nav id="mobileBottomNav">
-  <a href="/"><i class="fas fa-home"></i><span>Home</span></a>
-  <a href="/diagnose" class="active"><i class="fas fa-microscope"></i><span>Diagnose</span></a>
-  <a href="/market"><i class="fas fa-chart-line"></i><span>Mandi Prices</span></a>
-  <a href="/alerts"><i class="fas fa-bell"></i><span>Alerts</span></a>
+  <a href="/"><i class="fas fa-home"></i><span data-translate="nav_home_short">Home</span></a>
+  <a href="/diagnose" class="active"><i class="fas fa-microscope"></i><span data-translate="nav_diagnose_short">Diagnose</span></a>
+  <a href="/market"><i class="fas fa-chart-line"></i><span data-translate="nav_market_short">Mandi Prices</span></a>
+  <a href="/alerts"><i class="fas fa-bell"></i><span data-translate="nav_alerts">Alerts</span></a>
 </nav>
 
 <script src="/static/js/translations.js?v={{ build_version }}" defer></script>
