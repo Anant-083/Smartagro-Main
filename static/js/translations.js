@@ -76,6 +76,8 @@ const T = {
         generating_seasonal_advisory: 'Generating seasonal advisory...',
         awaiting_location: 'Awaiting location...',
         quick_jump_satellite: 'Satellite View & Vegetation Health',
+        section_map: 'Satellite View & Vegetation Health',
+        section_map_sub: 'Live environmental context from your location',
         quick_jump_crop_recs: 'Crop Recommendations',
         quick_jump_advisory_calendar: 'Crop Advisory Calendar',
         nav_dashboard: 'Dashboard',
