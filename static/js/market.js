@@ -362,10 +362,6 @@ function renderMarketGrid(markets) {
                 if (filtered.length === 0) return '';
                 hasVisible = true;
 
-                const INITIAL_LIMIT = 6;
-                const visibleCrops = filtered.slice(0, INITIAL_LIMIT);
-                const extraCrops = filtered.slice(INITIAL_LIMIT);
-
                 const renderRow = (crop) => {
                     const isUp   = crop.change >= 0;
                     const pctAbs = Math.abs(crop.change).toFixed(1);
@@ -386,33 +382,34 @@ function renderMarketGrid(markets) {
                     </div>`;
                 };
 
+                // Every crop renders immediately (no "show more" click needed);
+                // the card itself stays a fixed height and .crop-rows-wrapper
+                // scrolls internally when a city has more crops than fit. Keeps
+                // the whole grid visually even regardless of how many crops any
+                // one city has, and everything is one scroll away instead of
+                // hidden behind a toggle.
                 return `
         <div class="city-card" style="animation-delay:${cityIdx * 0.05}s">
-            <div class="city-card-header">
+            <div class="city-card-header" onclick="toggleCityCard(this)">
                 <div class="city-name">
                     <i class="fas fa-location-dot"></i> ${city}
                 </div>
-                <span class="city-count">${filtered.length} ${cropsLabel}</span>
-            </div>
-            <div class="crop-rows">
-                <div class="crop-row-header">
-                    <span>${cropLabel}</span>
-                    <span>${priceLabel}</span>
-                    <span>${changeLabel}</span>
-                    <span class="cr-demand-hdr">${demandLabel}</span>
+                <div class="city-header-right">
+                    <span class="city-count">${filtered.length} ${cropsLabel}</span>
+                    <i class="fas fa-chevron-down city-chevron"></i>
                 </div>
-                ${visibleCrops.map(renderRow).join('')}
-                ${extraCrops.length > 0 ? `
-                <div class="more-crops" style="display:none">
-                    ${extraCrops.map(renderRow).join('')}
-                </div>` : ''}
             </div>
-            ${extraCrops.length > 0 ? `
-            <div class="city-card-footer">
-                <button class="toggle-crops-btn" onclick="toggleCityCrops(this, ${extraCrops.length})">
-                    <i class="fas fa-chevron-down"></i> Show ${extraCrops.length} more crops
-                </button>
-            </div>` : ''}
+            <div class="crop-rows-wrapper">
+                <div class="crop-rows">
+                    <div class="crop-row-header">
+                        <span>${cropLabel}</span>
+                        <span>${priceLabel}</span>
+                        <span>${changeLabel}</span>
+                        <span class="cr-demand-hdr">${demandLabel}</span>
+                    </div>
+                    ${filtered.map(renderRow).join('')}
+                </div>
+            </div>
         </div>`;
     }).join('');
 
@@ -426,19 +423,19 @@ function renderMarketGrid(markets) {
     }, 100);
 }
 
-window.toggleCityCrops = function(btn, count) {
-    const card = btn.closest('.city-card');
+// Cards start expanded (scrollable) by default — clicking the header
+// collapses/re-expands a card, useful on mobile where screen space is
+// tight and a farmer only wants to check a couple of specific cities.
+window.toggleCityCard = function(header) {
+    const card = header.closest('.city-card');
     if (!card) return;
-    const more = card.querySelector('.more-crops');
-    if (!more) return;
+    const wrapper = card.querySelector('.crop-rows-wrapper');
+    const chevron = header.querySelector('.city-chevron');
+    if (!wrapper) return;
 
-    if (more.style.display === 'none' || !more.style.display) {
-        more.style.display = 'block';
-        btn.innerHTML = `<i class="fas fa-chevron-up"></i> Show less`;
-    } else {
-        more.style.display = 'none';
-        btn.innerHTML = `<i class="fas fa-chevron-down"></i> Show ${count} more crops`;
-    }
+    const collapsed = card.classList.toggle('collapsed');
+    if (chevron) chevron.classList.toggle('rotated', !collapsed);
+    wrapper.style.display = collapsed ? 'none' : '';
 };
 
 function getDemandClass(demand) {
