@@ -688,6 +688,37 @@ body.light-theme .cs-weather {
   background: linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e);
   box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
 }
+
+/* ── Animated circular NDVI gauge ────────────────────────
+   Replaces the flat number+bar with an arc gauge that fills based on
+   vegetation score, animating in on load. Uses the same color scale as
+   the progress bar above (red→orange→yellow→green) via the ndvi-gauge-*
+   modifier classes set in JS based on score. */
+.ndvi-gauge-wrap {
+  width: 140px;
+  height: 140px;
+  margin: 0 auto 16px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ndvi-gauge { width: 100%; height: 100%; }
+.ndvi-gauge-track { stroke: var(--bg-3); }
+#ndviArc {
+  transition: stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1);
+  stroke: var(--green);
+}
+.ndvi-gauge-wrap.ndvi-poor #ndviArc     { stroke: #ef4444; }
+.ndvi-gauge-wrap.ndvi-fair #ndviArc     { stroke: #f97316; }
+.ndvi-gauge-wrap.ndvi-moderate #ndviArc { stroke: #eab308; }
+.ndvi-gauge-wrap.ndvi-good #ndviArc     { stroke: var(--green); }
+.ndvi-gauge-value {
+  position: absolute;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--text-1);
+}
 .veg-last-observed {
   font-size: 0.85rem;
   color: #5f7063;
