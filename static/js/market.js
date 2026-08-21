@@ -548,12 +548,10 @@ function clearSearch() {
     if (none)     none.style.display     = 'none';
 
     if (grid) grid.innerHTML = `
-        <div style="grid-column:1/-1;text-align:center;padding:60px 0;">
-            <div class="loading-spinner"></div>
-            <p style="color:var(--text-2);margin-top:12px;font-size:0.9rem">
-                ${_t('Loading markets') || 'Loading markets…'}
-            </p>
-        </div>`;
+        <div class="skeleton skeleton-market"></div>
+        <div class="skeleton skeleton-market"></div>
+        <div class="skeleton skeleton-market"></div>
+        <div class="skeleton skeleton-market"></div>`;
 
     renderMarketGrid(allMarketData);
     buildPriceTable(allMarketData);
