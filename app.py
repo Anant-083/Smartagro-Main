@@ -284,9 +284,9 @@ LANG_NAMES = {
     "bodo":"Bodo","doi":"Dogri","sa":"Sanskrit",
 }
 
-logger.info(f"[AgroSmart] Groq key:    {'OK (' + GROQ_API_KEY[:8] + '...)' if GROQ_API_KEY else 'MISSING'}")
+logger.info(f"[AgroSmart] Groq key: {'OK (' + GROQ_API_KEY[:8] + '...)' if GROQ_API_KEY else 'MISSING'}")
 logger.info(f"[AgroSmart] Weather key: {'OK' if OPENWEATHER_API_KEY else 'MISSING'}")
-logger.info(f"[AgroSmart] Ninja key:   {'OK (' + NINJA_API_KEY[:8] + '...)' if NINJA_API_KEY else 'MISSING'}")
+logger.info(f"[AgroSmart] Ninja key: {'OK (' + NINJA_API_KEY[:8] + '...)' if NINJA_API_KEY else 'MISSING'}")
 logger.info(f"[AgroSmart] Sentinel-2 NDVI: {'ENABLED (rasterio available)' if _RASTERIO_AVAILABLE else 'DISABLED (install rasterio)'}")
 
 
@@ -328,22 +328,7 @@ def _ndvi_status(ndvi: float) -> str:
 
 
 def get_sentinel2_ndvi(lat: float, lon: float) -> dict | None:
-    """
-    Fetch a real NDVI value at (lat, lon) from Sentinel-2 L2A imagery.
-
-    Pipeline:
-      1. Query the free Element84 Earth Search STAC API for the 10 most recent
-         Sentinel-2 L2A scenes that cover the point, filtered to ≤40 % cloud cover.
-         Falls back to ≤80 % cloud if nothing cleaner is available.
-      2. Pick the scene with the lowest cloud cover.
-      3. Use rasterio's /vsicurl/ driver to open the Red (B04) and NIR (B08)
-         Cloud-Optimized GeoTIFFs directly over HTTP without downloading the full
-         tile – only a small 5×5 pixel window centred on the point is streamed.
-      4. Compute NDVI = (NIR − Red) / (NIR + Red) and return metadata.
-
-    Returns a dict with keys: ndvi, status, obs_date, source, cloud_pct
-    or None on any failure (the caller should degrade gracefully).
-    """
+    """ Fetch a real NDVI value at (lat, lon) from Sentinel-2 L2A imagery. Pipeline: 1. Query the free Element84 Earth Search STAC API for the 10 most recent Sentinel-2 L2A scenes that cover the point, filtered to ≤40 % cloud cover. Falls back to ≤80 % cloud if nothing cleaner is available. 2. Pick the scene with the lowest cloud cover. 3. Use rasterio's /vsicurl/ driver to open the Red (B04) and NIR (B08) Cloud-Optimized GeoTIFFs directly over HTTP without downloading the full tile – only a small 5×5 pixel window centred on the point is streamed. 4. Compute NDVI = (NIR − Red) / (NIR + Red) and return metadata. Returns a dict with keys: ndvi, status, obs_date, source, cloud_pct or None on any failure (the caller should degrade gracefully). """
     if not _RASTERIO_AVAILABLE:
         return None  # rasterio not installed
 
@@ -569,8 +554,7 @@ _OPENMETEO_CACHE_TTL = 6 * 3600  # 6 hours — forecasts don't change that fast
 
 
 def _fetch_openmeteo_forecast(lat, lon):
-    """Real daily forecast (up to 16 days) from Open-Meteo. Returns [] on any
-    failure — callers must treat a missing day as unavailable, never guess."""
+    """Real daily forecast (up to 16 days) from Open-Meteo. Returns [] on any failure — callers must treat a missing day as unavailable, never guess."""
     try:
         lat_f, lon_f = float(lat), float(lon)
     except (TypeError, ValueError):
@@ -643,11 +627,7 @@ def _fetch_openmeteo_forecast(lat, lon):
 
 @app.route("/api/debug-openmeteo")
 def debug_openmeteo():
-    """Diagnostic-only endpoint — open this URL directly in a browser to see
-    exactly what Open-Meteo returns (or what error it throws) from this
-    server, without needing to dig through Render's log viewer.
-    Gated behind DEBUG_MODE like /api/debug-market, so it isn't reachable
-    in production."""
+    """Diagnostic-only endpoint — open this URL directly in a browser to see exactly what Open-Meteo returns (or what error it throws) from this server, without needing to dig through Render's log viewer. Gated behind DEBUG_MODE like /api/debug-market, so it isn't reachable in production."""
     if not DEBUG_MODE:
         return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
     lat = request.args.get("lat", "22.57")
@@ -827,9 +807,7 @@ CROP_AI_CACHE_TTL_SEC = 3 * 60 * 60  # 3 hours — same city/season/weather buck
 
 
 def ai_recommend_crops(city, lat, lon, temp, humidity, rain, season):
-    """Ask Groq for crops genuinely suited to THIS location's climate, soil
-    region and season. Returns None on any failure so the caller can fall
-    back to rule-based recommend_crops() and the dashboard never breaks."""
+    """Ask Groq for crops genuinely suited to THIS location's climate, soil region and season. Returns None on any failure so the caller can fall back to rule-based recommend_crops() and the dashboard never breaks."""
     if not GROQ_API_KEY:
         return None
 
@@ -839,45 +817,7 @@ def ai_recommend_crops(city, lat, lon, temp, humidity, rain, season):
     if cached and (now - cached[0]) < CROP_AI_CACHE_TTL_SEC:
         return cached[1]
 
-    prompt = f"""You are an expert Indian agronomist advising a farmer in India.
-
-Location / Place: {city or "an unspecified Indian region"} (approx. lat {lat}, lon {lon})
-Current season: {season}
-Current live weather right now: {temp} deg C, {humidity}% humidity, {rain} mm recent rainfall
-
-CRITICAL INSTRUCTION: You MUST recommend EXACTLY 6 DIFFERENT crops best suited to THIS exact location's climate, soil region, and live weather. Do NOT return only 1 or 2 crops!
-
-Do NOT recommend tobacco, opium poppy, cannabis/hemp, or any other controlled, licensed-only, or health-sensitive crop, even if agronomically suited to the region — this app only recommends common food, cash, and commercial crops a general farmer can grow without special government licensing.
-
-Use your knowledge of Indian agro-climatic zones (e.g. black cotton soil across Maharashtra/Deccan, alluvial soil in the Indo-Gangetic plain, laterite soil along coastal belts, arid/sandy soil in Rajasthan, red soil in South India, etc.) to pick 6 realistic, regionally-appropriate crops, ordered from best to weakest fit for THIS location.
-
-ACCURACY RULES — read carefully:
-- Every field below must be YOUR OWN genuine analysis for each specific crop at this specific location and weather. Do not reuse the same numbers across crops, and do not default to round or "typical-looking" numbers — compute each field based on that crop's real agronomic profile.
-- "match": your own honest 0-100% suitability score for THIS crop at THIS location/weather/season, decreasing from crop 1 (best fit) to crop 6 (weakest of your 6 picks). Two different crops should essentially never share the same score by coincidence.
-- "yield", "profit", "duration", "fertilizer": use realistic figures specific to that crop's real agronomy — these vary a lot crop to crop (e.g. sugarcane duration is far longer than tomato; rice fertilizer needs differ from mustard's) so do not copy generic filler ranges.
-- "location_suitability" and "weather_suitability" must each cite the ACTUAL current numbers given above (this location's real soil/region, and the real {temp}°C / {humidity}% figures), not generic language.
-
-Respond ONLY with a JSON object, no preamble, no markdown fences, matching exactly this shape (values below are placeholders showing the expected TYPE/FORMAT only — replace every one with your own real analysis):
-{{
-  "crops": [
-    {{
-      "name": "<crop name>",
-      "icon": "<one relevant emoji>",
-      "match": "<your computed 0-100 suitability score>%",
-      "description": "<short explanation of why it suits this location & weather>",
-      "location_suitability": "<specific reason tied to {city or 'this place'}'s real soil & region>",
-      "weather_suitability": "<specific reason tied to the real current {temp}°C temp & {humidity}% humidity>",
-      "season": "Kharif (Monsoon) | Rabi (Winter) | Zaid (Summer)",
-      "water": "High | Medium | Low",
-      "yield": "<realistic yield range for this crop, e.g. 'X-Y tonnes/ha'>",
-      "profit": "<realistic profit range for this crop, e.g. 'Rs X,000-Y,000/ha'>",
-      "duration": "<this crop's real growth duration, e.g. 'X-Y days'>",
-      "soil": "<this crop's actual preferred soil type>",
-      "fertilizer": "<this crop's actual real NPK recommendation, e.g. 'NPK X:Y:Z kg/ha'>"
-    }}
-  ]
-}}
-The "crops" array must contain exactly 6 such objects, each for a different crop, each independently reasoned."""
+    prompt = f"""You are an expert Indian agronomist advising a farmer in India. Location / Place: {city or "an unspecified Indian region"} (approx. lat {lat}, lon {lon}) Current season: {season} Current live weather right now: {temp} deg C, {humidity}% humidity, {rain} mm recent rainfall CRITICAL INSTRUCTION: You MUST recommend EXACTLY 6 DIFFERENT crops best suited to THIS exact location's climate, soil region, and live weather. Do NOT return only 1 or 2 crops! Do NOT recommend tobacco, opium poppy, cannabis/hemp, or any other controlled, licensed-only, or health-sensitive crop, even if agronomically suited to the region — this app only recommends common food, cash, and commercial crops a general farmer can grow without special government licensing. Use your knowledge of Indian agro-climatic zones (e.g. black cotton soil across Maharashtra/Deccan, alluvial soil in the Indo-Gangetic plain, laterite soil along coastal belts, arid/sandy soil in Rajasthan, red soil in South India, etc.) to pick 6 realistic, regionally-appropriate crops, ordered from best to weakest fit for THIS location. ACCURACY RULES — read carefully: - Every field below must be YOUR OWN genuine analysis for each specific crop at this specific location and weather. Do not reuse the same numbers across crops, and do not default to round or "typical-looking" numbers — compute each field based on that crop's real agronomic profile. - "match": your own honest 0-100% suitability score for THIS crop at THIS location/weather/season, decreasing from crop 1 (best fit) to crop 6 (weakest of your 6 picks). Two different crops should essentially never share the same score by coincidence. - "yield", "profit", "duration", "fertilizer": use realistic figures specific to that crop's real agronomy — these vary a lot crop to crop (e.g. sugarcane duration is far longer than tomato; rice fertilizer needs differ from mustard's) so do not copy generic filler ranges. - "location_suitability" and "weather_suitability" must each cite the ACTUAL current numbers given above (this location's real soil/region, and the real {temp}°C / {humidity}% figures), not generic language. Respond ONLY with a JSON object, no preamble, no markdown fences, matching exactly this shape (values below are placeholders showing the expected TYPE/FORMAT only — replace every one with your own real analysis): {{ "crops": [ {{ "name": "<crop name>", "icon": "<one relevant emoji>", "match": "<your computed 0-100 suitability score>%", "description": "<short explanation of why it suits this location & weather>", "location_suitability": "<specific reason tied to {city or 'this place'}'s real soil & region>", "weather_suitability": "<specific reason tied to the real current {temp}°C temp & {humidity}% humidity>", "season": "Kharif (Monsoon) | Rabi (Winter) | Zaid (Summer)", "water": "High | Medium | Low", "yield": "<realistic yield range for this crop, e.g. 'X-Y tonnes/ha'>", "profit": "<realistic profit range for this crop, e.g. 'Rs X,000-Y,000/ha'>", "duration": "<this crop's real growth duration, e.g. 'X-Y days'>", "soil": "<this crop's actual preferred soil type>", "fertilizer": "<this crop's actual real NPK recommendation, e.g. 'NPK X:Y:Z kg/ha'>" }} ] }} The "crops" array must contain exactly 6 such objects, each for a different crop, each independently reasoned."""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -1179,7 +1119,7 @@ CITY_STATE = {
     "Amritsar":      "Punjab",
 
     # ── More cities in already-covered states (no extra API calls — same
-    #    state fetch is reused) ──
+    # state fetch is reused) ──
     "Vadodara":      "Gujarat",
     "Rajkot":        "Gujarat",
     "Nashik":        "Maharashtra",
@@ -1265,9 +1205,7 @@ def _save_history_cache(cache):
 
 
 def _field(record: dict, *keys):
-    """data.gov.in resources don't always serve field names consistently
-    (snake_case vs the legacy CKAN 'Modal_x0020_Price' style, or different
-    capitalisation) — try every known variant before giving up."""
+    """data.gov.in resources don't always serve field names consistently (snake_case vs the legacy CKAN 'Modal_x0020_Price' style, or different capitalisation) — try every known variant before giving up."""
     for k in keys:
         v = record.get(k)
         if v not in (None, ""):
@@ -1276,10 +1214,7 @@ def _field(record: dict, *keys):
 
 
 def _parse_arrival_date(date_str):
-    """Normalize Agmarknet's arrival_date (commonly DD/MM/YYYY) to a sortable
-    ISO YYYY-MM-DD string, so multiple real reporting dates in one response
-    can be deduped and ordered correctly. Returns None if unrecognized —
-    callers skip records whose date we can't trust rather than guessing."""
+    """Normalize Agmarknet's arrival_date (commonly DD/MM/YYYY) to a sortable ISO YYYY-MM-DD string, so multiple real reporting dates in one response can be deduped and ordered correctly. Returns None if unrecognized — callers skip records whose date we can't trust rather than guessing."""
     if not date_str:
         return None
     date_str = str(date_str).strip()
@@ -1308,10 +1243,7 @@ STATE_NAME_CANDIDATES = {
 
 
 def fetch_agmarknet_prices(state: str) -> list:
-    """Fetch REAL, government-reported mandi (wholesale market) prices for a
-    state from data.gov.in's official Agmarknet dataset. Returns [] if the
-    feed has nothing usable right now (caller reports this city as having
-    no live data — no fabricated numbers are substituted)."""
+    """Fetch REAL, government-reported mandi (wholesale market) prices for a state from data.gov.in's official Agmarknet dataset. Returns [] if the feed has nothing usable right now (caller reports this city as having no live data — no fabricated numbers are substituted)."""
     now = time.monotonic()
     cached = _agmark_fetch_cache.get(state)
     if cached and (now - cached[0]) < AGMARK_CACHE_TTL_SEC:
@@ -1684,9 +1616,7 @@ _CHAT_FALLBACK_MSG = {
 
 
 def _chat_fallback_reply(messages, lang):
-    """Friendly, localized reply for when Groq itself is unreachable/erroring.
-    Adds a simple keyword-based pointer to a relevant app section so the
-    farmer still gets *something* useful instead of a dead end."""
+    """Friendly, localized reply for when Groq itself is unreachable/erroring. Adds a simple keyword-based pointer to a relevant app section so the farmer still gets *something* useful instead of a dead end."""
     base = _CHAT_FALLBACK_MSG.get(lang, _CHAT_FALLBACK_MSG["en"])
 
     last_user_msg = ""
@@ -1708,11 +1638,7 @@ def _chat_fallback_reply(messages, lang):
 
 
 def _gemini_chat_reply(system_prompt, messages):
-    """Fallback for the chatbot when Groq fails — sends the exact same
-    system prompt and conversation to Gemini instead, so the farmer gets a
-    real, context-aware answer rather than a canned apology. Returns None
-    (not raises) on any failure, so the caller can fall through to the
-    final localized fallback message."""
+    """Fallback for the chatbot when Groq fails — sends the exact same system prompt and conversation to Gemini instead, so the farmer gets a real, context-aware answer rather than a canned apology. Returns None (not raises) on any failure, so the caller can fall through to the final localized fallback message."""
     if not GEMINI_API_KEY:
         return None
     try:
@@ -1753,8 +1679,7 @@ def _gemini_chat_reply(system_prompt, messages):
 # all, so the app can't be steered into acting as a general-purpose
 # chatbot in front of an audience.
 def _compile_word_matchers(words):
-    """Builds a single regex that matches any of `words` as whole words
-    (word-boundary), case-insensitive. Returns (compiled_regex, raw_list)."""
+    """Builds a single regex that matches any of `words` as whole words (word-boundary), case-insensitive. Returns (compiled_regex, raw_list)."""
     escaped = [re.escape(w) for w in words]
     rx = re.compile(r"\b(" + "|".join(escaped) + r")\b", re.IGNORECASE)
     return rx, words
@@ -1780,11 +1705,7 @@ _CHAT_ON_TOPIC_RX, _CHAT_ON_TOPIC_RAW = _compile_word_matchers(_CHAT_ON_TOPIC_WO
 
 
 def _chat_message_on_topic(text: str) -> bool:
-    """Returns False only when the message clearly matches an off-topic
-    keyword AND has no farming signal at all. Defaults to True (on-topic)
-    for anything ambiguous or short, since a false "off-topic" refusal is
-    far more annoying to a genuine farmer than an occasional off-topic
-    message slipping through to the (still-instructed) LLM."""
+    """Returns False only when the message clearly matches an off-topic keyword AND has no farming signal at all. Defaults to True (on-topic) for anything ambiguous or short, since a false "off-topic" refusal is far more annoying to a genuine farmer than an occasional off-topic message slipping through to the (still-instructed) LLM."""
     if not text or len(text.strip()) < 2:
         return True
     low = text.lower()
@@ -1826,15 +1747,18 @@ def _off_topic_reply(lang: str) -> str:
 # real numbers even if the model's wording glosses over them.
 _CHAT_INTENT_KEYWORDS = {
     "market":   ["price", "mandi", "rate", "sell", "bhav", "bhaav", "daam", "dam",
-                 "keemat", "kimat", "mulya", "market", "kharid"],
+                 "keemat", "kimat", "mulya", "market", "kharid",
+                 "मंडी", "भाव", "दाम", "कीमत", "मूल्य", "बाज़ार", "बाजार"],
     "crops":    ["what to grow", "which crop", "recommend crop", "suggest crop",
-                 "what should i plant", "which seed", "best crop"],
+                 "what should i plant", "which seed", "best crop",
+                 "कौन सी फसल", "फसल", "बुवाई", "उगाएं"],
     "seasonal": ["season", "calendar", "when to sow", "when to plant", "monsoon prep",
-                 "rabi", "kharif", "zaid"],
+                 "rabi", "kharif", "zaid", "मौसमी", "सलाह"],
     "weather":  ["weather", "rain", "mausam", "barish", "temperature", "forecast",
-                 "will it rain", "humid", "garmi", "thand"],
+                 "will it rain", "humid", "garmi", "thand",
+                 "बारिश", "मौसम", "धूप", "हवा"],
     "alerts":   ["alert", "warning", "risk", "danger", "chetavani", "khatra",
-                 "any warning", "safe today"],
+                 "any warning", "safe today", "खतरा", "सावधान", "कीट", "हमला"],
 }
 
 
@@ -1848,10 +1772,7 @@ def _chat_detect_intents(text: str) -> set:
 
 
 def _geocode_city(name):
-    """Best-effort city name -> (lat, lon, resolved name, state) using
-    Open-Meteo's free geocoding endpoint (no API key needed, no extra
-    account to manage). Returns None on any failure so callers can fall
-    back to the dashboard's known location instead of guessing."""
+    """Best-effort city name -> (lat, lon, resolved name, state) using Open-Meteo's free geocoding endpoint (no API key needed, no extra account to manage). Returns None on any failure so callers can fall back to the dashboard's known location instead of guessing."""
     if not name:
         return None
     try:
@@ -1876,28 +1797,59 @@ def _geocode_city(name):
 # Matches "in Lucknow", "at Pune", "near Nashik", "for Indore" etc. so the
 # gateway can tell WHICH city a message is actually asking about, instead
 # of always assuming the farmer's current dashboard location.
-_CHAT_LOCATION_RX = re.compile(
-    r"\b(?:in|at|near|for)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})\b", re.IGNORECASE
-)
-# Common words that follow "in/at/near/for" without naming a place
-# ("in the morning", "for me", "near here") — reject these so they don't
-# get treated as a city name and geocoded.
-_CHAT_LOCATION_STOPWORDS = {
-    "the", "my", "our", "your", "this", "that", "these", "those", "here",
-    "there", "me", "us", "today", "tomorrow", "morning", "evening", "night",
-    "future", "general", "case", "some", "any", "field", "farm",
+# City detection: match against your app's OWN known-city list
+# (CITY_STATE, already used for market lookups elsewhere) instead of
+# parsing grammar/prepositions. This sidesteps the whole "in Patna" vs
+# "Patna mein" word-order problem entirely — it doesn't matter what
+# language or word order the farmer uses, if a real city name appears
+# anywhere in the message, it's found. Sorted longest-first so "New Delhi"
+# matches before the shorter "Delhi" would.
+_RECOGNISED_CITIES = sorted(CITY_STATE.keys(), key=len, reverse=True)
+
+# Old/alternate city names still in everyday use that don't appear in
+# CITY_STATE under their current official name, plus Devanagari-script
+# names for the most common major cities — a farmer typing in actual
+# Hindi script (not just Hinglish) should still be recognized.
+_CHAT_CITY_ALIASES = {
+    "calcutta": "Kolkata",
+    "bombay": "Mumbai",
+    "madras": "Chennai",
+    "bangalore": "Bengaluru",
+    "new delhi": "Delhi",
+    "दिल्ली": "Delhi",
+    "मुंबई": "Mumbai",
+    "बॉम्बे": "Mumbai",
+    "कोलकाता": "Kolkata",
+    "कलकत्ता": "Kolkata",
+    "चेन्नई": "Chennai",
+    "हैदराबाद": "Hyderabad",
+    "पुणे": "Pune",
+    "अहमदाबाद": "Ahmedabad",
+    "लखनऊ": "Lucknow",
+    "जयपुर": "Jaipur",
+    "भोपाल": "Bhopal",
+    "पटना": "Patna",
+    "नागपुर": "Nagpur",
+    "इंदौर": "Indore",
+    "सूरत": "Surat",
+    "कानपुर": "Kanpur",
+    "अमृतसर": "Amritsar",
+    "वाराणसी": "Varanasi",
+    "आगरा": "Agra",
 }
 
 
 def _chat_detect_city(text: str):
-    m = _CHAT_LOCATION_RX.search(text or "")
-    if not m:
+    if not text:
         return None
-    candidate = m.group(1).strip()
-    first_word = candidate.split()[0].lower()
-    if first_word in _CHAT_LOCATION_STOPWORDS:
-        return None
-    return candidate
+    low = text.lower()
+    for alias, city in _CHAT_CITY_ALIASES.items():
+        if alias in low:
+            return city
+    for city in _RECOGNISED_CITIES:
+        if city.lower() in low:
+            return city
+    return None
 
 
 # Common crop name -> aliases (English + Hindi transliteration + regional
@@ -1932,11 +1884,7 @@ def _chat_detect_commodity(text: str):
 
 
 def _fetch_current_weather(lat, lon):
-    """Standalone current-conditions fetch used by the chat tool gateway.
-    Kept separate from the main /api/weather route (which also merges in
-    forecast + Open-Meteo data via a ThreadPoolExecutor) so this stays a
-    fast, single-purpose call — chat needs "what's it like right now",
-    not the full multi-source forecast merge."""
+    """Standalone current-conditions fetch used by the chat tool gateway. Kept separate from the main /api/weather route (which also merges in forecast + Open-Meteo data via a ThreadPoolExecutor) so this stays a fast, single-purpose call — chat needs "what's it like right now", not the full multi-source forecast merge."""
     if not lat or not lon:
         return None
     try:
@@ -1963,9 +1911,7 @@ def _fetch_current_weather(lat, lon):
 
 
 def _resolve_chat_location(city_hint, lat, lon):
-    """If the message names a specific city, geocode it and use THAT
-    location. Otherwise fall back to whatever the dashboard already sent
-    (current location). Returns (lat, lon, display_name)."""
+    """If the message names a specific city, geocode it and use THAT location. Otherwise fall back to whatever the dashboard already sent (current location). Returns (lat, lon, display_name)."""
     if city_hint:
         geo = _geocode_city(city_hint)
         if geo:
@@ -1974,10 +1920,7 @@ def _resolve_chat_location(city_hint, lat, lon):
 
 
 def _chat_weather_tool(city_hint, lat, lon):
-    """Live current weather for the chat gateway, resolved independently
-    of the dashboard — so chat can answer "will it rain in Lucknow"
-    correctly even if the farmer's dashboard location is somewhere else
-    entirely, or if they open chat without ever loading the dashboard."""
+    """Live current weather for the chat gateway, resolved independently of the dashboard — so chat can answer "will it rain in Lucknow" correctly even if the farmer's dashboard location is somewhere else entirely, or if they open chat without ever loading the dashboard."""
     r_lat, r_lon, r_name = _resolve_chat_location(city_hint, lat, lon)
     if not r_lat or not r_lon:
         return {"ok": False}
@@ -1988,10 +1931,7 @@ def _chat_weather_tool(city_hint, lat, lon):
 
 
 def _chat_alerts_tool(city_hint, lat, lon):
-    """Real, rule-based risk alerts for the chat gateway — same engine
-    (_compute_alerts_for_conditions) your dedicated Alerts page uses,
-    driven by freshly-fetched live weather rather than the LLM guessing
-    at risk. Lets a farmer ask "any warnings today?" directly in chat."""
+    """Real, rule-based risk alerts for the chat gateway — same engine (_compute_alerts_for_conditions) your dedicated Alerts page uses, driven by freshly-fetched live weather rather than the LLM guessing at risk. Lets a farmer ask "any warnings today?" directly in chat."""
     r_lat, r_lon, r_name = _resolve_chat_location(city_hint, lat, lon)
     if not r_lat or not r_lon:
         return {"ok": False}
@@ -2010,13 +1950,7 @@ def _chat_alerts_tool(city_hint, lat, lon):
 
 
 def _chat_fetch_market_rows(state, commodity=None):
-    """Three-tier market lookup so a chat price question never hangs or
-    comes back empty:
-      1. Shared cache (instant, same cache /api/market already uses)
-      2. A fresh live fetch, capped to 6s so chat stays responsive even
-         if the government feed is slow
-      3. If both fail, return [] honestly rather than fabricating a
-         price — the reply will fall back to general advice instead."""
+    """Three-tier market lookup so a chat price question never hangs or comes back empty: 1. Shared cache (instant, same cache /api/market already uses) 2. A fresh live fetch, capped to 6s so chat stays responsive even if the government feed is slow 3. If both fail, return [] honestly rather than fabricating a price — the reply will fall back to general advice instead."""
     now = time.monotonic()
     cached = _agmark_fetch_cache.get(state)
     if cached and (now - cached[0]) < AGMARK_CACHE_TTL_SEC:
@@ -2044,9 +1978,7 @@ def _chat_fetch_market_rows(state, commodity=None):
 
 
 def _chat_market_tool(state: str, commodity: str = None):
-    """Live mandi prices for a state, optionally filtered to one commodity
-    the farmer actually asked about, reusing the exact same government
-    data source and cache as /api/market."""
+    """Live mandi prices for a state, optionally filtered to one commodity the farmer actually asked about, reusing the exact same government data source and cache as /api/market."""
     if not state:
         return {"ok": False}
     rows = _chat_fetch_market_rows(state, commodity)
@@ -2057,9 +1989,7 @@ def _chat_market_tool(state: str, commodity: str = None):
 
 
 def _chat_crops_tool(temp, humidity, rain, city, lat, lon):
-    """Rule-based crop suggestions (no extra LLM call — keeps this tool
-    fast and cheap) using the exact same logic as /api/crop-recommendations'
-    offline fallback."""
+    """Rule-based crop suggestions (no extra LLM call — keeps this tool fast and cheap) using the exact same logic as /api/crop-recommendations' offline fallback."""
     try:
         season = get_season(datetime.now().month)
         crops = recommend_crops(temp or 25, humidity or 60, rain or 0, season, city, lat, lon)
@@ -2079,11 +2009,7 @@ def _chat_seasonal_tool(city, humidity):
 
 
 def _chat_run_gateway(intents, context_data, message_text=""):
-    """Execute the requested tools and return (sections, summaries).
-    sections  — [] str, appended to the LLM's context so the reply uses LIVE data.
-    summaries — [] str, brief one-line LIVE-data notes appended to the reply so
-                the farmer is guaranteed to see the fetched numbers even if
-                the model's wording omits them."""
+    """Execute the requested tools and return (sections, summaries). sections — [] str, appended to the LLM's context so the reply uses LIVE data. summaries — [] str, brief one-line LIVE-data notes appended to the reply so the farmer is guaranteed to see the fetched numbers even if the model's wording omits them."""
     city = context_data.get("city") or ""
     lat = context_data.get("lat")
     lon = context_data.get("lon")
@@ -2239,31 +2165,7 @@ def kisan_chat():
         if gateway_sections:
             location_block += "\n\n" + "\n".join(gateway_sections)
 
-    system_prompt = f"""You are Kisan Helper, a smart AI assistant for Indian farmers in the SmartAgro app.
-Answer ONLY: Agriculture, Crops, Soil, Pest Control, Fertilizers, Irrigation, Water Management, Govt schemes (PM-KISAN, PMFBY, KCC), SmartAgro app features.
-For anything unrelated, politely refuse in {lang_name}.
-Answer in {lang_name} (native script). Be SHORT and COMPLETE: max 4-5 bullet points or 3 sentences. Never leave an answer unfinished.
-
-App Navigation: If the user asks about checking features, provide direct Markdown links to navigate there. Use EXACTLY these formats:
-- Dashboard/Home/Location: [Dashboard](/)
-- Crop Health/Disease/Upload Photo: [Diagnose Crop](/diagnose)
-- Market Prices/Mandi: [Market Prices](/market)
-- Weather Alerts/Forecast: [Alerts](/alerts)
-No markdown headers (#, ##). No asterisks for bullets — use • instead.{location_block}
-
-SOIL KNOWLEDGE: You know about soil types (clay, loamy, sandy, silt, black, red, alluvial, laterite), pH levels, nutrients (NPK), organic matter, soil testing, and which crops suit which soil.
-
-APP SECTION RULES — only suggest a section when it is DIRECTLY relevant:
-• Suggest [Diagnose Crop](/diagnose) ONLY if the user asks about crop disease, leaf spots, pest infestation, plant infection, or crop health problems.
-• Suggest [Market Prices](/market) ONLY if the user asks about mandi rates, selling price, MSP, commodity prices, or where to sell crops.
-• Suggest [Dashboard](/) ONLY if the user asks about weather forecast, rain, temperature, or local weather conditions.
-• Suggest [Alerts](/alerts) ONLY if the user asks about severe weather warnings, flood, frost, storm, or pest outbreak warnings.
-• Mention the Helpline (1800-180-1551, bottom-left button) ONLY if the user needs expert phone support.
-• For general farming questions (how to grow, fertilizer, irrigation, soil, seasons) — answer directly WITHOUT suggesting any app section unless it truly helps.
-
-LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or questions about their location — use the FARMER'S CURRENT LOCATION & WEATHER data above to give a specific, direct answer.
-
-RESTRICTED CROPS: Never give cultivation advice, growing steps, or encouragement for tobacco, opium poppy, cannabis/hemp, or other controlled/licensed-only crops, even if agronomically asked about or technically legal with a special government license. If asked, briefly note that this app focuses on common food and commercial crops and doesn't advise on licensed/controlled crops, then offer to help with a suitable alternative crop for their location instead."""
+    system_prompt = f"""You are Kisan Helper, a smart AI assistant for Indian farmers in the SmartAgro app. Answer ONLY: Agriculture, Crops, Soil, Pest Control, Fertilizers, Irrigation, Water Management, Govt schemes (PM-KISAN, PMFBY, KCC), SmartAgro app features. For anything unrelated, politely refuse in {lang_name}. Answer in {lang_name} (native script). Be SHORT and COMPLETE: max 4-5 bullet points or 3 sentences. Never leave an answer unfinished. App Navigation: If the user asks about checking features, provide direct Markdown links to navigate there. Use EXACTLY these formats: - Dashboard/Home/Location: [Dashboard](/) - Crop Health/Disease/Upload Photo: [Diagnose Crop](/diagnose) - Market Prices/Mandi: [Market Prices](/market) - Weather Alerts/Forecast: [Alerts](/alerts) No markdown headers (#, ##). No asterisks for bullets — use • instead.{location_block} SOIL KNOWLEDGE: You know about soil types (clay, loamy, sandy, silt, black, red, alluvial, laterite), pH levels, nutrients (NPK), organic matter, soil testing, and which crops suit which soil. APP SECTION RULES — only suggest a section when it is DIRECTLY relevant: • Suggest [Diagnose Crop](/diagnose) ONLY if the user asks about crop disease, leaf spots, pest infestation, plant infection, or crop health problems. • Suggest [Market Prices](/market) ONLY if the user asks about mandi rates, selling price, MSP, commodity prices, or where to sell crops. • Suggest [Dashboard](/) ONLY if the user asks about weather forecast, rain, temperature, or local weather conditions. • Suggest [Alerts](/alerts) ONLY if the user asks about severe weather warnings, flood, frost, storm, or pest outbreak warnings. • Mention the Helpline (1800-180-1551, bottom-left button) ONLY if the user needs expert phone support. • For general farming questions (how to grow, fertilizer, irrigation, soil, seasons) — answer directly WITHOUT suggesting any app section unless it truly helps. LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or questions about their location — use the FARMER'S CURRENT LOCATION & WEATHER data above to give a specific, direct answer. RESTRICTED CROPS: Never give cultivation advice, growing steps, or encouragement for tobacco, opium poppy, cannabis/hemp, or other controlled/licensed-only crops, even if agronomically asked about or technically legal with a special government license. If asked, briefly note that this app focuses on common food and commercial crops and doesn't advise on licensed/controlled crops, then offer to help with a suitable alternative crop for their location instead."""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -2410,14 +2312,7 @@ vision_models = [
 
 
 def ai_is_crop_image(image_b64):
-    """Fast, low-token sanity check BEFORE running the full diagnosis prompt:
-    does this photo actually show a plant/crop part? Without this, the main
-    prompt will happily hallucinate a plausible-sounding disease name for a
-    photo of a hand, a sack of grain, or a selfie — which is worse than
-    useless for a farmer trying to protect a crop.
-    Fails OPEN (assumes "yes, it's a plant") on any error/timeout/missing
-    key, so a flaky classifier call never blocks a genuine diagnosis.
-    Returns (is_plant: bool, reason: str | None)."""
+    """Fast, low-token sanity check BEFORE running the full diagnosis prompt: does this photo actually show a plant/crop part? Without this, the main prompt will happily hallucinate a plausible-sounding disease name for a photo of a hand, a sack of grain, or a selfie — which is worse than useless for a farmer trying to protect a crop. Fails OPEN (assumes "yes, it's a plant") on any error/timeout/missing key, so a flaky classifier call never blocks a genuine diagnosis. Returns (is_plant: bool, reason: str | None)."""
     if not GROQ_API_KEY:
         return True, None
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -2459,8 +2354,7 @@ def ai_is_crop_image(image_b64):
 
 
 def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
-    """Run one diagnosis pass against one Groq vision model and return parsed
-    JSON, or None if that pass failed."""
+    """Run one diagnosis pass against one Groq vision model and return parsed JSON, or None if that pass failed."""
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
         "model": model,
@@ -2488,11 +2382,7 @@ def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
 
 
 def _run_gemini_pass(image_b64, prompt, sys_prompt):
-    """Run one diagnosis pass against Google's Gemini API and return parsed
-    JSON, or None on any failure. When GEMINI_API_KEY is configured this gives
-    the ensemble a genuinely INDEPENDENT second model (different vendor,
-    different weights) so an agreement between Groq & Gemini is real
-    cross-model evidence."""
+    """Run one diagnosis pass against Google's Gemini API and return parsed JSON, or None on any failure. When GEMINI_API_KEY is configured this gives the ensemble a genuinely INDEPENDENT second model (different vendor, different weights) so an agreement between Groq & Gemini is real cross-model evidence."""
     if not GEMINI_API_KEY:
         return None
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
@@ -2527,9 +2417,7 @@ def _run_gemini_pass(image_b64, prompt, sys_prompt):
 
 
 def _diseases_agree(name_a, name_b):
-    """Fuzzy-match two disease name strings so small phrasing differences
-    between passes still count as agreement, while genuinely different
-    diagnoses are correctly flagged as a disagreement."""
+    """Fuzzy-match two disease name strings so small phrasing differences between passes still count as agreement, while genuinely different diagnoses are correctly flagged as a disagreement."""
     if not name_a or not name_b:
         return False
     a, b = name_a.strip().lower(), name_b.strip().lower()
@@ -2542,9 +2430,7 @@ def _diseases_agree(name_a, name_b):
 
 # ── QA logging: store every image + result for human spot-checking ──────
 def _save_diagnosis_image(image_b64, record_id):
-    """Persist the uploaded image next to its diagnosis record so a
-    reviewer can see exactly what the model saw. Returns the saved filename,
-    or None on failure (non-fatal)."""
+    """Persist the uploaded image next to its diagnosis record so a reviewer can see exactly what the model saw. Returns the saved filename, or None on failure (non-fatal)."""
     try:
         raw = base64.b64decode(image_b64)
         img_hash = hashlib.sha256(raw).hexdigest()[:12]
@@ -2558,8 +2444,7 @@ def _save_diagnosis_image(image_b64, record_id):
 
 
 def _log_diagnosis(record):
-    """Append one diagnosis record (image ref + every ensemble pass' raw
-    output + the merged final answer) to a JSONL audit log."""
+    """Append one diagnosis record (image ref + every ensemble pass' raw output + the merged final answer) to a JSONL audit log."""
     try:
         with _diagnosis_log_lock:
             with open(DIAGNOSIS_LOG_PATH, "a", encoding="utf-8") as f:
@@ -2616,19 +2501,7 @@ def diagnose_crop():
     else:
         lang_instruction = ""
 
-    prompt = f"""You are an expert agricultural plant pathologist AI. Look very carefully at this crop image.
-Respond ONLY with valid JSON, no markdown or backticks:
-{{
-  "disease": "Exact disease name",
-  "confidence": 88,
-  "severity": "Mild or Moderate or Severe",
-  "affected_part": "Leaves/Stem/Fruit/Root/Cob",
-  "cause": "Specific pathogen and spread method",
-  "eco_remedies": [{{"remedy": "Remedy", "method": "Steps", "frequency": "How often", "effectiveness": 80}}],
-  "chemical_remedies": [{{"name": "Chemical", "dose": "Dose per litre", "interval": "Days between sprays"}}],
-  "prevention": ["tip1", "tip2", "tip3"],
-  "recovery_timeline": "Weeks for recovery"
-}}{lang_instruction}"""
+    prompt = f"""You are an expert agricultural plant pathologist AI. Look very carefully at this crop image. Respond ONLY with valid JSON, no markdown or backticks: {{ "disease": "Exact disease name", "confidence": 88, "severity": "Mild or Moderate or Severe", "affected_part": "Leaves/Stem/Fruit/Root/Cob", "cause": "Specific pathogen and spread method", "eco_remedies": [{{"remedy": "Remedy", "method": "Steps", "frequency": "How often", "effectiveness": 80}}], "chemical_remedies": [{{"name": "Chemical", "dose": "Dose per litre", "interval": "Days between sprays"}}], "prevention": ["tip1", "tip2", "tip3"], "recovery_timeline": "Weeks for recovery" }}{lang_instruction}"""
 
     sys_prompt = "Expert plant pathologist. Return ONLY valid JSON."
     if lang != "en" and lang_name:
@@ -2736,8 +2609,7 @@ Respond ONLY with valid JSON, no markdown or backticks:
 # ─── Diagnosis QA review endpoints (internal, DEBUG_MODE only) ──────────────
 @app.route('/api/diagnose-log')
 def diagnose_log():
-    """Lets a human reviewer list recent diagnoses to spot-check the AI
-    against the real uploaded photo. Gated behind FLASK_DEBUG=1."""
+    """Lets a human reviewer list recent diagnoses to spot-check the AI against the real uploaded photo. Gated behind FLASK_DEBUG=1."""
     if not DEBUG_MODE:
         return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
     limit = min(int(request.args.get('limit', 50)), 500)
@@ -2768,8 +2640,7 @@ def diagnose_log_image(filename):
 
 @app.route('/api/diagnose-log/review', methods=["POST"])
 def diagnose_log_review():
-    """Lets a reviewer record a verdict against a logged diagnosis by
-    rewriting its line in the JSONL file atomically."""
+    """Lets a reviewer record a verdict against a logged diagnosis by rewriting its line in the JSONL file atomically."""
     if not DEBUG_MODE:
         return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
     data = request.json or {}
@@ -2844,8 +2715,7 @@ def diagnose_log_accuracy():
 
 # ─── Alerts ──────────────────────────────────────────────────────────────────
 def _compute_alerts_for_conditions(temp, humidity, wind_speed, rain, description, date_str=None):
-    """Upgraded rule engine for a single day of weather. Generates distinct,
-    location-and-weather-specific alerts for any range of weather parameters."""
+    """Upgraded rule engine for a single day of weather. Generates distinct, location-and-weather-specific alerts for any range of weather parameters."""
     description = (description or "").lower()
     alerts = []
     d_label = f" ({date_str})" if date_str else ""
@@ -2953,31 +2823,7 @@ def _ai_alerts_for_today(city, lat, lon, temp, humidity, wind_speed, rain, descr
     if cached and (now - cached[0]) < AI_ALERTS_CACHE_TTL_SEC:
         return cached[1]
 
-    prompt = f"""You are an expert agricultural meteorologist for India.
-
-Location: {city or 'Unknown'} (lat {lat}, lon {lon})
-Today's weather: {temp}°C, {humidity}% humidity, wind {wind_speed} m/s, {rain} mm rain, {description}
-
-Generate 3–6 specific, actionable agricultural alerts for a farmer at this location
-based on TODAY's weather conditions. Each alert must be SPECIFIC to these exact
-conditions — do not produce generic alerts.
-
-Categories: Weather, Pest, Disease, Crop Advisory
-Types: danger (life/crop threatening), warning (needs attention), info (advisory)
-
-Respond ONLY with a JSON object, no markdown, no backticks:
-{{
-  "alerts": [
-    {{
-      "type": "danger|warning|info",
-      "category": "Weather|Pest|Disease|Crop Advisory",
-      "icon": "one emoji",
-      "title": "Short alert title",
-      "message": "Detailed description of the risk (1-2 sentences)",
-      "action": "Specific action the farmer should take (1-2 sentences)"
-    }}
-  ]
-}}"""
+    prompt = f"""You are an expert agricultural meteorologist for India. Location: {city or 'Unknown'} (lat {lat}, lon {lon}) Today's weather: {temp}°C, {humidity}% humidity, wind {wind_speed} m/s, {rain} mm rain, {description} Generate 3–6 specific, actionable agricultural alerts for a farmer at this location based on TODAY's weather conditions. Each alert must be SPECIFIC to these exact conditions — do not produce generic alerts. Categories: Weather, Pest, Disease, Crop Advisory Types: danger (life/crop threatening), warning (needs attention), info (advisory) Respond ONLY with a JSON object, no markdown, no backticks: {{ "alerts": [ {{ "type": "danger|warning|info", "category": "Weather|Pest|Disease|Crop Advisory", "icon": "one emoji", "title": "Short alert title", "message": "Detailed description of the risk (1-2 sentences)", "action": "Specific action the farmer should take (1-2 sentences)" }} ] }}"""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -3037,32 +2883,7 @@ def _ai_alerts_for_forecast(city, lat, lon, forecast_days):
     if cached and (now - cached[0]) < AI_ALERTS_CACHE_TTL_SEC:
         return cached[1]
 
-    prompt = f"""You are an agricultural officer for {city or 'India'}.
-Analyze this {len(forecast_days)}-day weather forecast for local farmers:
-{days_summary}
-
-Provide specific, realistic agricultural alerts tailored to EACH day's exact weather.
-You MUST generate custom alerts for EVERY SINGLE DATE listed above.
-Do NOT repeat the exact same alert across multiple days.
-
-Respond ONLY with valid JSON:
-{{
-  "days": [
-    {{
-      "date": "YYYY-MM-DD",
-      "alerts": [
-        {{
-          "type": "danger|warning|info",
-          "category": "Weather|Pest|Disease|Crop Advisory",
-          "icon": "relevant emoji",
-          "title": "Clear, specific alert title",
-          "message": "Scientific yet practical advisory for this day's weather",
-          "action": "Actionable farmer recommendation with exact chemical/organic dose if applicable"
-        }}
-      ]
-    }}
-  ]
-}}"""
+    prompt = f"""You are an agricultural officer for {city or 'India'}. Analyze this {len(forecast_days)}-day weather forecast for local farmers: {days_summary} Provide specific, realistic agricultural alerts tailored to EACH day's exact weather. You MUST generate custom alerts for EVERY SINGLE DATE listed above. Do NOT repeat the exact same alert across multiple days. Respond ONLY with valid JSON: {{ "days": [ {{ "date": "YYYY-MM-DD", "alerts": [ {{ "type": "danger|warning|info", "category": "Weather|Pest|Disease|Crop Advisory", "icon": "relevant emoji", "title": "Clear, specific alert title", "message": "Scientific yet practical advisory for this day's weather", "action": "Actionable farmer recommendation with exact chemical/organic dose if applicable" }} ] }} ] }}"""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -3135,9 +2956,7 @@ def get_alerts():
 # ─── 6-Day Forecast Alerts (day-wise) ────────────────────────────────────────
 @app.route("/api/alerts-forecast", methods=["POST"])
 def get_alerts_forecast():
-    """Takes the 6-day forecast list (as returned by /api/weather) and generates
-    AI-powered, location-specific alerts for each day. Falls back to the rule
-    engine if the AI call fails."""
+    """Takes the 6-day forecast list (as returned by /api/weather) and generates AI-powered, location-specific alerts for each day. Falls back to the rule engine if the AI call fails."""
     data     = request.json or {}
     forecast = data.get("forecast", [])
     city     = data.get("city", "")
@@ -3254,9 +3073,7 @@ def _find_crop_thresholds(name, water_need):
 
 @app.route("/api/crop-risk", methods=["POST"])
 def crop_risk():
-    """Cross-references the dashboard's recommended crops against the 6-day
-    forecast and returns a danger percentage per crop, so a farmer can see
-    whether it's still a good idea to plant something given what's coming."""
+    """Cross-references the dashboard's recommended crops against the 6-day forecast and returns a danger percentage per crop, so a farmer can see whether it's still a good idea to plant something given what's coming."""
     data     = request.json or {}
     crops    = data.get("crops", [])
     forecast = data.get("forecast", [])
@@ -3338,9 +3155,7 @@ _model_throttle_lock = threading.Lock()
 
 
 def _throttle_model(model):
-    """Make sure consecutive calls to the same Groq model are spaced out,
-    even across concurrent threads, so a burst of chunk requests doesn't
-    look like a rate-limit-violating spike to Groq."""
+    """Make sure consecutive calls to the same Groq model are spaced out, even across concurrent threads, so a burst of chunk requests doesn't look like a rate-limit-violating spike to Groq."""
     with _model_throttle_lock:
         now = time.monotonic()
         next_slot = max(now, _model_last_call.get(model, 0) + MIN_CALL_INTERVAL_SEC)
@@ -3351,8 +3166,7 @@ def _throttle_model(model):
 
 
 def _post_to_groq(body, headers, max_retries=3):
-    """POST to Groq with throttling + exponential backoff specifically for
-    HTTP 429 (rate limit). Returns the final requests.Response."""
+    """POST to Groq with throttling + exponential backoff specifically for HTTP 429 (rate limit). Returns the final requests.Response."""
     model = body.get("model")
     resp = None
     for attempt in range(max_retries + 1):
@@ -3371,9 +3185,7 @@ def _post_to_groq(body, headers, max_retries=3):
 
 
 def _extract_json_object(raw_text):
-    """Pull a usable {term: translation} dict out of model output, repairing
-    the truncation/formatting issues that show up almost exclusively with
-    high-token-cost scripts."""
+    """Pull a usable {term: translation} dict out of model output, repairing the truncation/formatting issues that show up almost exclusively with high-token-cost scripts."""
     text = re.sub(r"```(?:json)?", "", raw_text).replace("```", "").strip()
     text = (text.replace("\u201c", '"').replace("\u201d", '"')
                 .replace("\u2018", "'").replace("\u2019", "'"))
@@ -3418,20 +3230,7 @@ def _build_translate_prompt(terms_chunk, lang_name, domain_note, lang_code=""):
     elif lang_code == "or":
         script_note = "MUST write EXCLUSIVELY in Odia script (ଓଡ଼ିଆ)."
 
-    return f"""You are an expert translator for Indian regional languages. Translate each English term below to {lang_name} ({lang_code}).
-
-CRITICAL RULES:
-1. Target Language: {lang_name} ({lang_code}). {script_note}
-2. Return ONLY a raw JSON object mapping each input term to its {lang_name} translation. No markdown, no backticks, no explanation.
-3. Every single key from the input list MUST appear in the output JSON, exactly as written.
-4. Keep unchanged: chemical/brand names, numbers, and units (kg/ha, Rs, days, ml/L, g/ha, quintal, SL, EC, SC, WP, SG, NPK).
-5. {domain_note}
-6. Use natural everyday terms a {lang_name}-speaking farmer would recognize.
-
-Input terms (translate ALL of these):
-{terms_json}
-
-Output: a single JSON object only."""
+    return f"""You are an expert translator for Indian regional languages. Translate each English term below to {lang_name} ({lang_code}). CRITICAL RULES: 1. Target Language: {lang_name} ({lang_code}). {script_note} 2. Return ONLY a raw JSON object mapping each input term to its {lang_name} translation. No markdown, no backticks, no explanation. 3. Every single key from the input list MUST appear in the output JSON, exactly as written. 4. Keep unchanged: chemical/brand names, numbers, and units (kg/ha, Rs, days, ml/L, g/ha, quintal, SL, EC, SC, WP, SG, NPK). 5. {domain_note} 6. Use natural everyday terms a {lang_name}-speaking farmer would recognize. Input terms (translate ALL of these): {terms_json} Output: a single JSON object only."""
 
 
 def _translate_terms_chunk(terms_chunk, lang_name, domain_note, lang_code=""):
@@ -3481,8 +3280,7 @@ def _translate_terms_chunk(terms_chunk, lang_name, domain_note, lang_code=""):
 
 
 def _translate_terms(terms, lang_name, domain_note, cache_key, cache_dict, lang_code=""):
-    """Translate a full term list via small, gently-paced parallel chunks,
-    with caching and a cleanup retry pass for chunks that failed outright."""
+    """Translate a full term list via small, gently-paced parallel chunks, with caching and a cleanup retry pass for chunks that failed outright."""
     if cache_key in cache_dict:
         return cache_dict[cache_key], True
 
@@ -3946,9 +3744,7 @@ def get_monthly_alerts():
     return jsonify({"monthly": monthly})
 
 def _seasonal_advisories(city, humidity=None):
-    """Standalone season/alert logic shared by the /api/seasonal-alerts route
-    and the chat tool gateway, so both stay in sync without duplicating the
-    rules."""
+    """Standalone season/alert logic shared by the /api/seasonal-alerts route and the chat tool gateway, so both stay in sync without duplicating the rules."""
     month = datetime.now().month
     if month in [3, 4, 5]:
         season = "Summer"
