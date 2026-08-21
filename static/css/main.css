@@ -632,6 +632,35 @@ h1,h2,h3,h4 { font-family: 'Syne', sans-serif; line-height: 1.2; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Skeleton Loading Shimmer ────────────────────────────
+   Shows a shaped gray placeholder with an animated shimmer sweep while
+   content loads, instead of just a spinner. Previews the layout that's
+   about to appear and makes the wait feel shorter — same pattern used by
+   YouTube/LinkedIn feed cards. Use alongside (or instead of) the spinner
+   above: add class="skeleton skeleton-crop" etc. to a placeholder div,
+   then swap it out for the real content once data arrives. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+}
+.skeleton::after {
+  content: '';
+  position: absolute; inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(74,222,128,0.09), transparent);
+  animation: skeletonShimmer 1.4s infinite;
+}
+@keyframes skeletonShimmer { 100% { transform: translateX(100%); } }
+.skeleton-crop     { height: 260px; border-radius: var(--radius); }
+.skeleton-timeline { height: 96px;  border-radius: var(--radius-sm); margin-bottom: 12px; }
+.skeleton-market   { height: 200px; border-radius: var(--radius); }
+.skeleton-block    { height: 180px; border-radius: var(--radius); }
+.skeleton-row      { height: 48px;  border-radius: var(--radius-sm); margin-bottom: 8px; }
+.skeleton-text     { height: 14px;  border-radius: 4px; margin-bottom: 8px; width: 100%; }
+.skeleton-text.short { width: 60%; }
+
 /* ── Toast Notification ──────────────────────────────── */
 .toast {
   position: fixed;
