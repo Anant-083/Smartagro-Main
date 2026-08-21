@@ -196,7 +196,9 @@
   align-items: start;
 }
 
-/* City Card */
+/* City Card — fixed height with an internally-scrolling crop list, so the
+   grid stays visually even no matter how many crops a city has, instead
+   of individual cards growing taller via a "show more" click. */
 .city-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -205,8 +207,12 @@
   transition: var(--trans);
   animation: fadeInUp 0.4s ease both;
   height: fit-content;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
 }
 .city-card:hover { border-color: var(--border-2); box-shadow: var(--shadow); }
+.city-card.collapsed { max-height: none; }
 
 .city-card-header {
   display: flex;
@@ -215,6 +221,9 @@
   padding: 18px 20px;
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
 }
 .city-name {
   display: flex;
@@ -225,7 +234,31 @@
   font-weight: 700;
 }
 .city-name i { color: var(--amber); font-size: 0.9rem; }
+.city-header-right { display: flex; align-items: center; gap: 10px; }
 .city-count { font-size: 0.75rem; color: var(--text-3); }
+.city-chevron {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  transition: transform 0.25s ease;
+}
+.city-chevron.rotated { transform: rotate(180deg); }
+
+/* The scrollable body — thin, green, unobtrusive scrollbar so it's clear
+   there's more content without looking like a raw browser scrollbar. */
+.crop-rows-wrapper {
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--green) transparent;
+}
+.crop-rows-wrapper::-webkit-scrollbar { width: 6px; }
+.crop-rows-wrapper::-webkit-scrollbar-track { background: transparent; }
+.crop-rows-wrapper::-webkit-scrollbar-thumb {
+  background: var(--green);
+  border-radius: 3px;
+  opacity: 0.5;
+}
+.crop-rows-wrapper::-webkit-scrollbar-thumb:hover { opacity: 0.8; }
 
 .crop-rows { padding: 4px 0; }
 
