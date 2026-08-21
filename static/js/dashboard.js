@@ -553,6 +553,11 @@ function showDashboardBuffering() {
               </div>
             </div>
           </div>
+        </div>
+        <div class="crop-skeleton-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:16px">
+          <div class="skeleton skeleton-crop"></div>
+          <div class="skeleton skeleton-crop"></div>
+          <div class="skeleton skeleton-crop"></div>
         </div>`;
     }
 
@@ -572,6 +577,11 @@ function showDashboardBuffering() {
               ${dt('Formulating week-by-week sowing, irrigation, fertilizer, and harvest timelines.')}
             </div>
           </div>
+        </div>
+        <div class="calendar-skeleton-stack" style="margin-top:16px">
+          <div class="skeleton skeleton-timeline"></div>
+          <div class="skeleton skeleton-timeline"></div>
+          <div class="skeleton skeleton-timeline"></div>
         </div>`;
     }
 
@@ -873,7 +883,7 @@ function renderVegetationHealth(vegData) {
     const hasData  = ndvi != null && !!vegData.obs_date;   // true only when a real Sentinel-2 reading came back
     const source   = vegData.source    || 'Sentinel-2 L2A';
     const cloudPct = vegData.cloud_pct != null ? `${vegData.cloud_pct}% cloud` : '';
-    const barWidth = ndvi != null ? Math.max(0, Math.min(100, ndvi * 100)) : 0;
+    const scorePct = ndvi != null ? Math.max(0, Math.min(100, ndvi * 100)) : 0;
     const ndviDisplay = ndvi != null ? ndvi.toFixed(3) : '—';
 
     // Short label for the subtitle badge
@@ -889,6 +899,18 @@ function renderVegetationHealth(vegData) {
         ? `Real satellite reflectance at your exact location — Copernicus ${source.replace('Copernicus ', '')} via Earth Search STAC (no login required).`
         : `We couldn't retrieve a real Sentinel-2 reading for this exact spot right now (often due to persistent cloud cover or no recent pass). This is not a fabricated value — try again later.`;
 
+    // Same red→orange→yellow→green scale the old bar used, now driving
+    // which color class the arc gauge picks up.
+    let gaugeClass = 'ndvi-poor';
+    if (scorePct >= 65)      gaugeClass = 'ndvi-good';
+    else if (scorePct >= 40) gaugeClass = 'ndvi-moderate';
+    else if (scorePct >= 20) gaugeClass = 'ndvi-fair';
+
+    // r=52 circle: circumference = 2 * PI * 52
+    const CIRC = 326.73;
+    // Start fully "empty" (offset = full circumference) so the CSS
+    // transition can animate it filling in once we set the real offset
+    // on the next frame, instead of popping straight to the final state.
     container.innerHTML = `
         <div class="veg-icon-wrapper">
             <i class="fas fa-seedling"></i>
@@ -897,13 +919,20 @@ function renderVegetationHealth(vegData) {
             <span class="veg-title-main">${dt('Vegetation Health')}</span>
             <span class="veg-title-sub">(${sourceShort})</span>
         </div>
-        <div class="veg-score-main">${ndviDisplay}</div>
-        <div class="veg-status-main">${dt(vegData.status) || vegData.status}</div>
-        
-        <div class="veg-progress-bar">
-            <div class="veg-progress-fill" style="width: ${barWidth}%"></div>
+
+        <div class="ndvi-gauge-wrap ${gaugeClass}">
+            <svg class="ndvi-gauge" viewBox="0 0 120 120">
+                <circle class="ndvi-gauge-track" cx="60" cy="60" r="52" fill="none" stroke-width="10"/>
+                <circle id="ndviArc" cx="60" cy="60" r="52" fill="none" stroke-width="10"
+                        stroke-linecap="round"
+                        stroke-dasharray="${CIRC}"
+                        stroke-dashoffset="${CIRC}"
+                        transform="rotate(-90 60 60)"/>
+            </svg>
+            <div class="ndvi-gauge-value">${ndviDisplay}</div>
         </div>
-        
+        <div class="veg-status-main">${dt(vegData.status) || vegData.status}</div>
+
         <div class="veg-last-observed">
             ${lastObservedLine}
         </div>
@@ -911,4 +940,11 @@ function renderVegetationHealth(vegData) {
             ${descLine}
         </div>
     `;
+
+    // Animate the arc filling in on the next frame (can't animate a CSS
+    // transition by setting the start and end value in the same paint).
+    requestAnimationFrame(() => {
+        const arc = document.getElementById('ndviArc');
+        if (arc) arc.style.strokeDashoffset = CIRC - (CIRC * scorePct / 100);
+    });
 }
