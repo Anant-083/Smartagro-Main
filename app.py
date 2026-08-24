@@ -147,6 +147,7 @@ def _add_static_cache_headers(response):
     return response
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
+VISUALCROSSING_API_KEY = os.getenv("VISUALCROSSING_API_KEY", "")  # extended forecast, days beyond OpenWeather's free ~5-6 day window
 GROQ_API_KEY        = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY       = os.getenv("GEMINI_API_KEY", "")
 NINJA_API_KEY       = os.getenv("NINJA_API_KEY", "")  # no longer used by /api/market (kept for backward-compat only)
@@ -510,143 +511,137 @@ def readyz():
 
 
 # ─── Weather API ─────────────────────────────────────────────────────────────
-# ─── Open-Meteo — real extended forecast (free, no key, up to 16 days) ──────
-# OpenWeather's free tier only gives ~5-6 real forecast days. Open-Meteo is
-# free with no API key and no rate limit, and genuinely provides up to 16
-# real daily forecast days — used here to extend the Alerts 30-day calendar
-# with real data for roughly half its span instead of leaving those days
-# blank/unavailable. Days beyond 16 still have no real forecast anywhere and
-# are honestly reported as unavailable, never invented.
-_WMO_CODE_MAP = {
-    0:  ("clear sky", "01"),          1:  ("mainly clear", "01"),
-    2:  ("partly cloudy", "02"),      3:  ("overcast", "04"),
-    45: ("fog", "50"),                48: ("depositing rime fog", "50"),
-    51: ("light drizzle", "09"),      53: ("moderate drizzle", "09"),
-    55: ("dense drizzle", "09"),      56: ("light freezing drizzle", "09"),
-    57: ("dense freezing drizzle", "09"),
-    61: ("slight rain", "10"),        63: ("moderate rain", "10"),
-    65: ("heavy rain", "10"),         66: ("light freezing rain", "10"),
-    67: ("heavy freezing rain", "10"),
-    71: ("slight snow fall", "13"),   73: ("moderate snow fall", "13"),
-    75: ("heavy snow fall", "13"),    77: ("snow grains", "13"),
-    80: ("slight rain showers", "09"),   81: ("moderate rain showers", "09"),
-    82: ("violent rain showers", "09"),
-    85: ("slight snow showers", "13"),   86: ("heavy snow showers", "13"),
-    95: ("thunderstorm", "11"),
-    96: ("thunderstorm with slight hail", "11"),
-    99: ("thunderstorm with heavy hail", "11"),
+# ─── Visual Crossing — real extended forecast (out to ~15 days) ─────────────
+# OpenWeather's free tier only gives ~5-6 real forecast days. Visual Crossing
+# extends that with real data for roughly the rest of the Alerts 30-day
+# calendar's span instead of leaving those days blank/unavailable. Days
+# beyond ~15-16 still have no real forecast anywhere and are honestly
+# reported as unavailable, never invented. (Previously used Open-Meteo here —
+# free and keyless, but its quota is shared across every app on Render's
+# shared free-tier IP, so it kept coming back empty.)
+
+
+# Icon-code mapping and cache setup for the extended-forecast provider
+# (Visual Crossing, replacing the old Open-Meteo call — see
+# _fetch_extended_forecast below for why).
+
+# Visual Crossing icon strings -> the OpenWeatherMap-style codes the frontend
+# already knows how to render (see getWeatherEmoji in static/js/main.js).
+# Keeping this mapping means the fallback path needs zero frontend changes.
+_VC_ICON_TO_OWM = {
+    "clear-day":            "01d",
+    "clear-night":          "01n",
+    "partly-cloudy-day":    "02d",
+    "partly-cloudy-night":  "02n",
+    "cloudy":               "03d",
+    "fog":                  "50d",
+    "wind":                 "50d",
+    "showers-day":          "09d",
+    "showers-night":        "09n",
+    "rain":                 "10d",
+    "thunder-rain":         "11d",
+    "thunder-showers-day":  "11d",
+    "thunder-showers-night":"11n",
+    "snow":                 "13d",
+    "snow-showers-day":     "13d",
+    "snow-showers-night":   "13n",
 }
 
 
-def _openmeteo_wmo_info(code):
-    desc, icon_base = _WMO_CODE_MAP.get(code, ("", "01"))
-    return desc, icon_base + "d"
+def _vc_icon_to_owm(vc_icon):
+    return _VC_ICON_TO_OWM.get(vc_icon, "02d")
 
 
-# Simple in-memory cache for Open-Meteo forecasts, keyed by location rounded
-# to ~1km precision. Open-Meteo's free tier has a daily request quota that's
-# shared across everyone on the same hosting IP (common on free-tier hosts
-# like Render), so caching is essential — without it, every single page
-# load/navigation was making a fresh call and exhausting the quota fast.
-_openmeteo_cache = {}
-_openmeteo_rate_limited_until = 0  # monotonic timestamp; skip calls until this passes
-_OPENMETEO_CACHE_TTL = 6 * 3600  # 6 hours — forecasts don't change that fast
+# Separate cache + rate-limit flag for the fallback provider, same shape and
+# same reasoning as the Open-Meteo one above.
+_visualcrossing_cache = {}
+_visualcrossing_rate_limited_until = 0
+_VISUALCROSSING_CACHE_TTL = 6 * 3600
 
 
-def _fetch_openmeteo_forecast(lat, lon):
-    """Real daily forecast (up to 16 days) from Open-Meteo. Returns [] on any failure — callers must treat a missing day as unavailable, never guess."""
+def _fetch_visualcrossing_forecast(lat, lon):
+    """Extended daily forecast from Visual Crossing (primary source for
+    days beyond OpenWeatherMap's ~5-6 day free-tier window). Free tier:
+    1,000 records/day, ~15-day forecast. Returns [] on any failure or if no
+    API key is configured — callers must treat a missing day as
+    unavailable, never guess."""
+    if not VISUALCROSSING_API_KEY:
+        return []
     try:
         lat_f, lon_f = float(lat), float(lon)
     except (TypeError, ValueError):
         return []
-    # Rounded to 1 decimal (~11km) rather than 2 (~1.1km) so nearby farmers
-    # share the same cache entry — this matters a lot on the free tier,
-    # since every distinct rounded coordinate burns a separate call against
-    # Open-Meteo's daily quota. Precision at this level is still far tighter
-    # than a day-level forecast actually varies over 11km.
+
     cache_key = (round(lat_f, 1), round(lon_f, 1))
-    cached = _openmeteo_cache.get(cache_key)
-    if cached and (time.time() - cached["ts"]) < _OPENMETEO_CACHE_TTL:
+    cached = _visualcrossing_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _VISUALCROSSING_CACHE_TTL:
         return cached["days"]
 
-    # Already know we're rate-limited for today — don't waste a call
-    # confirming that again, just serve whatever's cached (even if stale)
-    # or give up honestly.
-    global _openmeteo_rate_limited_until
-    if time.monotonic() < _openmeteo_rate_limited_until:
+    global _visualcrossing_rate_limited_until
+    if time.monotonic() < _visualcrossing_rate_limited_until:
         return cached["days"] if cached else []
 
     try:
         url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            "&daily=weathercode,temperature_2m_max,temperature_2m_min,"
-            "precipitation_sum,windspeed_10m_max,relative_humidity_2m_mean"
-            "&timezone=auto&forecast_days=16"
+            "https://weather.visualcrossing.com/VisualCrossingWebServices/"
+            f"rest/services/timeline/{lat},{lon}"
+            "?unitGroup=metric&include=days"
+            "&elements=datetime,tempmax,tempmin,humidity,windspeed,precip,conditions,icon"
+            f"&key={VISUALCROSSING_API_KEY}&contentType=json"
         )
         resp = requests.get(url, timeout=8)
         if resp.status_code == 429:
-            # Daily quota genuinely exhausted — stop retrying for a few
-            # hours instead of burning more of tomorrow's quota re-checking
-            # a limit we already know is hit.
-            _openmeteo_rate_limited_until = time.monotonic() + 3 * 3600
-            logger.warning(f"[Open-Meteo] 429 rate limited — pausing calls for 3h. {resp.text[:200]}")
+            _visualcrossing_rate_limited_until = time.monotonic() + 3 * 3600
+            logger.warning(f"[VisualCrossing] 429 rate limited — pausing calls for 3h. {resp.text[:200]}")
             return cached["days"] if cached else []
         if resp.status_code != 200:
-            # Other failure — serve stale cached data if we have any rather
-            # than nothing, since a forecast from a few hours ago is still
-            # far more useful than no data at all.
-            logger.info(f"[Open-Meteo] non-200 status {resp.status_code}: {resp.text[:200]}")
+            logger.info(f"[VisualCrossing] non-200 status {resp.status_code}: {resp.text[:200]}")
             return cached["days"] if cached else []
-        daily = resp.json().get("daily", {})
-        dates = daily.get("time", [])
+        days = resp.json().get("days", [])
         out = []
-        for i, date_str in enumerate(dates):
+        for d in days:
             try:
-                code = daily["weathercode"][i]
-                desc, icon = _openmeteo_wmo_info(code)
                 out.append({
-                    "date":        date_str,
-                    "temp_max":    daily["temperature_2m_max"][i],
-                    "temp_min":    daily["temperature_2m_min"][i],
-                    "description": desc,
-                    "icon":        icon,
-                    "humidity":    (daily.get("relative_humidity_2m_mean") or [60]*len(dates))[i],
-                    "wind_speed":  (daily.get("windspeed_10m_max") or [10]*len(dates))[i],
-                    "rain":        (daily.get("precipitation_sum") or [0]*len(dates))[i],
-                    "source":      "open-meteo",
+                    "date":        d["datetime"],
+                    "temp_max":    d.get("tempmax"),
+                    "temp_min":    d.get("tempmin"),
+                    "description": d.get("conditions", ""),
+                    "icon":        _vc_icon_to_owm(d.get("icon", "")),
+                    "humidity":    d.get("humidity", 60),
+                    "wind_speed":  d.get("windspeed", 10),
+                    "rain":        d.get("precip", 0) or 0,
+                    "source":      "visualcrossing",
                 })
-            except (IndexError, KeyError, TypeError):
+            except (KeyError, TypeError):
                 continue
-        _bounded_cache_set(_openmeteo_cache, cache_key, {"ts": time.time(), "days": out}, max_entries=300)
+        _bounded_cache_set(_visualcrossing_cache, cache_key, {"ts": time.time(), "days": out}, max_entries=300)
         return out
     except Exception as e:
-        logger.warning(f"[Open-Meteo error] {e}")
+        logger.warning(f"[VisualCrossing error] {e}")
         return cached["days"] if cached else []
 
 
-@app.route("/api/debug-openmeteo")
-def debug_openmeteo():
-    """Diagnostic-only endpoint — open this URL directly in a browser to see exactly what Open-Meteo returns (or what error it throws) from this server, without needing to dig through Render's log viewer. Gated behind DEBUG_MODE like /api/debug-market, so it isn't reachable in production."""
+def _fetch_extended_forecast(lat, lon):
+    """Extended daily forecast (out to ~15 real days) from Visual Crossing.
+    Replaces the old Open-Meteo call, which kept returning nothing usable —
+    on Render's shared free-tier IP its quota was being exhausted by other
+    apps on the same IP before this app ever got a turn. Returns [] on any
+    failure or if no API key is configured — callers must treat a missing
+    day as unavailable, never guess."""
+    return _fetch_visualcrossing_forecast(lat, lon)
+
+
+@app.route("/api/debug-extended-forecast")
+def debug_extended_forecast():
+    """Diagnostic-only endpoint — open this URL directly in a browser to see exactly what Visual Crossing returns (or what error it throws) from this server, without needing to dig through Render's log viewer. Gated behind DEBUG_MODE like /api/debug-market, so it isn't reachable in production."""
     if not DEBUG_MODE:
         return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
     lat = request.args.get("lat", "22.57")
     lon = request.args.get("lon", "88.36")
     try:
-        url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            "&daily=weathercode,temperature_2m_max,temperature_2m_min,"
-            "precipitation_sum,windspeed_10m_max,relative_humidity_2m_mean"
-            "&timezone=auto&forecast_days=16"
-        )
-        resp = requests.get(url, timeout=8)
-        raw_snippet = resp.text[:500]
-        days = _fetch_openmeteo_forecast(lat, lon)
+        days = _fetch_extended_forecast(lat, lon)
         return jsonify({
-            "request_url":      url,
-            "http_status":      resp.status_code,
-            "raw_response_snippet": raw_snippet,
+            "visualcrossing_key_set": bool(VISUALCROSSING_API_KEY),
             "parsed_day_count": len(days),
             "parsed_days":      days[:3],
         })
@@ -671,10 +666,10 @@ def get_weather():
         with ThreadPoolExecutor(max_workers=3) as ex:
             current_future   = ex.submit(requests.get, current_url,  timeout=10)
             forecast_future   = ex.submit(requests.get, forecast_url, timeout=10)
-            openmeteo_future  = ex.submit(_fetch_openmeteo_forecast, lat, lon)
+            extended_future  = ex.submit(_fetch_extended_forecast, lat, lon)
             current_resp  = current_future.result()
             forecast_resp = forecast_future.result()
-            openmeteo_days = openmeteo_future.result()
+            extended_days = extended_future.result()
 
         if current_resp.status_code == 429 or forecast_resp.status_code == 429:
             return jsonify({
@@ -719,16 +714,19 @@ def get_weather():
         for d in openweather_days:
             d["source"] = "openweather"
 
-        # Extend with real Open-Meteo days for any date OpenWeather doesn't
-        # already cover, up to 16 total days. Still real forecast data, not
-        # invented — just a second free, keyless source with longer real
-        # range than OpenWeather's free tier gives.
+        # Extend with real Visual Crossing days for any date OpenWeather
+        # doesn't already cover, up to 16 total days. Still real forecast
+        # data, not invented — just a second source with longer real range
+        # than OpenWeather's free tier gives. (Previously Open-Meteo; swapped
+        # out because its free quota is shared across every app on Render's
+        # shared IP and kept coming back empty.)
         covered_dates = {d["date"] for d in openweather_days}
-        extra_days = [d for d in openmeteo_days if d["date"] not in covered_dates]
+        extra_days = [d for d in extended_days if d["date"] not in covered_dates]
         forecast_list = sorted(openweather_days + extra_days, key=lambda d: d["date"])[:16]
         logger.info(f"[Weather] openweather_days={len(openweather_days)} "
-              f"openmeteo_days={len(openmeteo_days)} "
+              f"extended_days={len(extended_days)} "
               f"merged_total={len(forecast_list)}")
+
 
         return jsonify({
             "current": {
@@ -1899,7 +1897,7 @@ def _chat_detect_commodity(text: str):
 
 
 def _fetch_current_weather(lat, lon):
-    """Standalone current-conditions fetch used by the chat tool gateway. Kept separate from the main /api/weather route (which also merges in forecast + Open-Meteo data via a ThreadPoolExecutor) so this stays a fast, single-purpose call — chat needs "what's it like right now", not the full multi-source forecast merge."""
+    """Standalone current-conditions fetch used by the chat tool gateway. Kept separate from the main /api/weather route (which also merges in forecast + Visual Crossing data via a ThreadPoolExecutor) so this stays a fast, single-purpose call — chat needs "what's it like right now", not the full multi-source forecast merge."""
     if not lat or not lon:
         return None
     try:
