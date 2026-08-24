@@ -3700,13 +3700,14 @@ def get_monthly_alerts():
             pass
     daily_alerts = { d.get("date"): d for d in data.get("daily_alerts", []) }
 
-    # Show only the rest of the CURRENT calendar month (today through the
-    # month's last day) instead of a fixed rolling 30 days, so it never
-    # spills into next month.
-    days_in_month = calendar.monthrange(base_date.year, base_date.month)[1]
-    days_remaining_in_month = days_in_month - base_date.day + 1
+    # Rolling window matching the real forecast range actually available
+    # (OpenWeather ~5-6 days + Visual Crossing extension, capped at 16 by
+    # /api/weather) — NOT bounded to the current calendar month. Deliberately
+    # spills into next month when the window crosses a month boundary, since
+    # the point is "next N real days," not "rest of this month."
+    window_days = len(forecast) if forecast else 15
 
-    for i in range(days_remaining_in_month):
+    for i in range(window_days):
         curr_date = base_date + timedelta(days=i)
         date_str = curr_date.strftime("%Y-%m-%d")
         
@@ -3732,11 +3733,11 @@ def get_monthly_alerts():
             alerts = [{"title": a.get("title", "")} for a in d_alerts.get("alerts", [])]
         else:
             # No real forecast/alert data exists for this day (beyond the
-            # ~6-day window OpenWeather actually provides). We do NOT invent
-            # a risk number or alert title here — that would be fabricated
-            # data presented as if it were real. Instead this is reported
-            # honestly as unavailable so the frontend can show "no data yet"
-            # rather than a fake risk percentage.
+            # real range Visual Crossing/OpenWeather actually provide). We do
+            # NOT invent a risk number or alert title here — that would be
+            # fabricated data presented as if it were real. Instead this is
+            # reported honestly as unavailable so the frontend can show
+            # "no data yet" rather than a fake risk percentage.
             monthly.append({
                 "date":          date_str,
                 "risk":          "unavailable",
