@@ -1219,9 +1219,11 @@ async function loadMonthlyAlerts() {
 
     try {
         // The weekly view above is capped to 7 days on purpose, but the
-        // Monthly calendar should get real data for as many days as the
-        // forecast genuinely covers (up to ~16 real days). If the real
-        // forecast is longer than what the weekly fetch already covered,
+        // Monthly calendar is a rolling window covering the full real
+        // forecast range (up to ~15-16 real days from Visual Crossing +
+        // OpenWeather), not bounded to the current calendar month — it can
+        // and will spill into next month near month-end. If that real
+        // window is longer than what the weekly fetch already covered,
         // fetch alerts for the full window here instead of reusing the
         // 7-day-capped dailyAlertsData.
         let monthlyDailyAlerts = dailyAlertsData || [];
@@ -1259,6 +1261,8 @@ async function loadMonthlyAlerts() {
         });
         const data = await res.json();
         const monthly = data.monthly || [];
+
+
 
         // Only render days with real, fetched data. Days beyond real
         // forecast coverage used to render as a separate "No data" /
