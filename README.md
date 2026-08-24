@@ -214,14 +214,6 @@ This app deliberately avoids fabricating data it doesn't have:
 - Market prices only show real, government-reported Agmarknet data — non-crop entries (livestock, poultry, ornamental flowers, timber) that appear in the raw feed are filtered out (`_NON_CROP_COMMODITY_RX` in `app.py`).
 - Seasonal advisories only assert a pest/fungal risk when real humidity data crosses a defined threshold — never as a default claim.
 
----
-
-## 📄 License
-
-Add your license here.
-
----
-
 <div align="center">
 
 Built for Indian farmers 🇮🇳 &nbsp;•&nbsp; Powered by open weather, satellite, and government data
