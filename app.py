@@ -74,6 +74,35 @@ logging.basicConfig(
 logger = logging.getLogger("smartagro")
 
 
+def _groq_vision_post(url, headers, payload, timeout=45):
+    """POST to Groq with retry-with-backoff specifically for HTTP 429
+    (rate limit) and transient network errors, so a diagnosis request
+    doesn't fail outright the moment Groq's rate limit is briefly hit —
+    it waits and retries a couple of times first. Respects the
+    Retry-After header when Groq provides one."""
+    resp = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        except requests.RequestException as e:
+            if attempt < 2:
+                logger.warning(f"[GroqVision] request error (retry {attempt + 1}): {e}")
+                time.sleep(0.8 * (attempt + 1))
+                continue
+            raise
+        if resp.status_code != 429:
+            return resp
+        retry_after = resp.headers.get("Retry-After")
+        try:
+            wait = float(retry_after) if retry_after else (1.0 * (attempt + 1))
+        except (TypeError, ValueError):
+            wait = 1.0 * (attempt + 1)
+        if attempt < 2:
+            logger.warning(f"[GroqVision] 429 rate limited, retrying in {wait:.1f}s (attempt {attempt + 1})")
+            time.sleep(wait)
+    return resp
+
+
 # ── Bounded in-memory cache helper ──────────────────────────────────────────
 # Several endpoints keep small in-memory dicts (translation results, weather,
 # crop-AI suggestions, market prices, alerts) that live for the lifetime of
@@ -481,6 +510,11 @@ def usage_api():
 
 @app.route("/api/usage/reset", methods=["POST"])
 def usage_reset():
+    # Was previously unprotected — anyone who found this URL could wipe
+    # production usage analytics. Matches the same guard already used on
+    # every other admin/debug endpoint in this file.
+    if not DEBUG_MODE:
+        return jsonify({"error": "Not available in production. Set FLASK_DEBUG=1 in .env"}), 403
     global _usage_stats, _last_usage_save
     with _usage_lock:
         _usage_stats = {
@@ -2382,9 +2416,9 @@ def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
         "max_tokens": 1400,
         "reasoning_effort": "none",
     }
-    resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                          headers=headers, json=body, timeout=45)
-    if resp.status_code != 200:
+    resp = _groq_vision_post("https://api.groq.com/openai/v1/chat/completions",
+                              headers, body, timeout=45)
+    if resp is None or resp.status_code != 200:
         return None
     raw = resp.json()["choices"][0]["message"]["content"].strip()
     cleaned = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
