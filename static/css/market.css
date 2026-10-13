@@ -243,6 +243,54 @@
 }
 .city-chevron.rotated { transform: rotate(180deg); }
 
+/* ── City status badges (LIVE / CACHED / N/A) ────────────── */
+.city-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 50px;
+  vertical-align: middle;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badge-live {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  animation: livePulse 2s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.3); }
+  50%       { box-shadow: 0 0 0 4px rgba(74,222,128,0); }
+}
+.badge-cached {
+  background: rgba(251, 191, 36, 0.13);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+.badge-no-data {
+  background: rgba(248, 113, 113, 0.10);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+/* ── Updated-time label shown in city card header ─────────── */
+.city-updated-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+
 /* The scrollable body — thin, green, unobtrusive scrollbar so it's clear
    there's more content without looking like a raw browser scrollbar. */
 .crop-rows-wrapper {
@@ -590,6 +638,7 @@
   .price-ticker { height: 38px; }
   .city-card-header { padding: 12px 14px; }
   .city-name { font-size: 0.95rem; }
+  .city-updated-time { display: none; }
 
   .market-quick-jumps {
     gap: 8px;
