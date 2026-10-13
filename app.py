@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import logging
 import uuid
-
+from flask import send_from_directory 
 # ── Windows fix: force IPv4 for outbound requests ───────────────────────────
 # If a browser reaches a URL instantly but Python's `requests` times out on 
 # the exact same URL, it is almost always because requests/urllib3 tries
@@ -12,12 +12,14 @@ import uuid
 # HTTP stack to only use IPv4, matching what the browser effectively does.
 try:
     import socket
+    import sys
     import urllib3.util.connection as urllib3_conn
 
     def _allowed_gai_family():
         return socket.AF_INET  # IPv4 only
 
-    urllib3_conn.allowed_gai_family = _allowed_gai_family
+    if sys.platform == "win32":
+        urllib3_conn.allowed_gai_family = _allowed_gai_family
 except Exception as _e:
     logger.info(f"[AgroSmart] Could not force IPv4 (non-fatal): {_e}")
 import os
@@ -55,10 +57,10 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 # The diagnose route already checks image size manually, but every other
 # JSON-accepting route (chat, alerts, translate-*) had no cap at all, so an
 # oversized POST body could tie up memory/CPU on our constrained Render
-# instance. 12 MB covers the largest legitimate payload (diagnose image
+# instance. 16 MB covers the largest legitimate payload (diagnose image
 # base64, ~10MB cap) with headroom, and rejects anything bigger before Flask
 # even parses it.
-app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # 12 MB
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
 
 
 @app.errorhandler(413)
@@ -155,8 +157,10 @@ DEBUG_MODE          = os.getenv("FLASK_DEBUG", "0") == "1"
 
 # Gemini is used as a genuinely INDEPENDENT second vision model in the crop
 # diagnosis ensemble. Only active when GEMINI_API_KEY is set in .env.
-GEMINI_DIAGNOSIS_MODEL = os.getenv("GEMINI_DIAGNOSIS_MODEL", "gemini-3.1-flash-lite")
-
+# gemini-3.6-flash: primary — confirmed working, good quota (Sep 2026).
+# gemini-3.5-flash: kept as waterfall fallback if primary is overloaded/unavailable.
+# gemini-3.1-pro-preview was removed — Pro models require a paid plan (causes 429).
+GEMINI_DIAGNOSIS_MODEL = os.getenv("GEMINI_DIAGNOSIS_MODEL", "gemini-3.6-flash")
 # ── Per-feature usage analytics ─────────────────────────────────────────────
 # Tracks how often each SmartAgro feature is used (page views + API calls) as
 # aggregate counters — NO personal data, NO IPs, NO message content. Counters
@@ -272,8 +276,10 @@ DIAGNOSIS_LOG_PATH   = os.path.join(DIAGNOSIS_LOG_DIR, "log.jsonl")
 os.makedirs(DIAGNOSIS_IMAGES_DIR, exist_ok=True)
 _diagnosis_log_lock = threading.Lock()
 
-# Number of independent diagnosis passes to run and cross-check per image.
-ENSEMBLE_PASSES = 2
+# Number of independent Groq diagnosis passes per image.
+# 1 = single fast pass (Gemini Pro runs in parallel and provides cross-check).
+# Increasing this multiplies rate-limit pressure on Groq — keep at 1.
+ENSEMBLE_PASSES = 1
 
 _translation_cache = {}
 
@@ -1024,7 +1030,6 @@ if not DATA_GOV_API_KEY:
     logger.info("[AgroSmart] WARNING: DATA_GOV_API_KEY not set — /api/market will use MSP reference prices only")
 AGMARKNET_RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
 AGMARKNET_URL = f"https://api.data.gov.in/resource/{AGMARKNET_RESOURCE_ID}"
-
 # Reusable session with automatic retries — helps ride out brief network
 # hiccups instead of failing on the first slow attempt.
 _agmark_session = requests.Session()
@@ -1217,6 +1222,65 @@ def _save_history_cache(cache):
         logger.info(f"[Market] Could not persist history cache: {e}")
 
 
+def _build_results_from_history_cache(state: str) -> list:
+    """Build a result list (same format as fetch_agmarknet_prices returns) from
+    the persisted market_history_cache.json for the given state.  Used as a
+    fallback when the live API call returns no data."""
+    try:
+        with _agmark_history_lock:
+            cache = _load_history_cache()
+        state_hist = cache.get(state, {})
+        if not state_hist:
+            return []
+        results = []
+        for commodity, hist in state_hist.items():
+            if not hist:
+                continue
+            hist_sorted = sorted(hist, key=lambda h: h["date"])
+            prices = [h["price"] for h in hist_sorted]
+            if len(prices) >= 2:
+                prev_price = prices[-2]
+                today_price = prices[-1]
+                change = round(((today_price - prev_price) / prev_price) * 100, 2) if prev_price else 0.0
+            else:
+                change = 0.0
+            results.append({
+                "crop":         commodity,
+                "crop_key":     commodity,
+                "price":        int(round(prices[-1])),
+                "change":       change,
+                "history":      prices,
+                "unit":         "Rs/quintal",
+                "source":       "history_cache",
+                "market":       "",
+                "district":     "",
+                "arrival_date": hist_sorted[-1]["date"],
+            })
+        return results
+    except Exception as e:
+        logger.warning(f"[Market] Could not build results from history cache for {state}: {e}")
+        return []
+
+
+def _get_history_last_updated(state: str) -> str:
+    """Return the latest date string (ISO YYYY-MM-DD) found in the history cache
+    for the given state, or an empty string if none exists.  Used to display
+    'last updated X ago' on the market page for history-only cities."""
+    try:
+        with _agmark_history_lock:
+            cache = _load_history_cache()
+        state_hist = cache.get(state, {})
+        latest = ""
+        for hist in state_hist.values():
+            for entry in hist:
+                d = entry.get("date", "")
+                if d and d > latest:
+                    latest = d
+        return latest
+    except Exception:
+        return ""
+
+
 def _field(record: dict, *keys):
     """data.gov.in resources don't always serve field names consistently (snake_case vs the legacy CKAN 'Modal_x0020_Price' style, or different capitalisation) — try every known variant before giving up."""
     for k in keys:
@@ -1293,8 +1357,12 @@ def fetch_agmarknet_prices(state: str) -> list:
             continue
 
     if not records:
-        logger.info(f"[Market] Agmarknet: no usable records for {state} after trying all name variants")
-        return []
+        logger.info(f"[Market] Agmarknet: no usable records for {state} after trying all name variants — falling back to history cache")
+        fallback = _build_results_from_history_cache(state)
+        if fallback:
+            logger.info(f"[Market] History cache fallback for {state}: {len(fallback)} commodities")
+            _bounded_cache_set(_agmark_fetch_cache, state, (time.monotonic(), fallback), max_entries=60)
+        return fallback
 
     # Log the exact keys of the first record once, so if parsing still
     # fails you can see the real field names by checking your app logs.
@@ -1504,8 +1572,12 @@ def get_market_data():
         }), 200
 
     markets = {}
-    empty_cities = []
+    city_meta = {}   # {city: {"data_status": "live"|"history"|"no_data", "last_updated": iso_str}}
+    live_cities = []
+    history_cities = []
+    no_data_cities = []
     live_total = 0
+    now_iso = datetime.now().isoformat()
 
     try:
         # Fetch every unique state IN PARALLEL instead of one-by-one — with
@@ -1534,12 +1606,33 @@ def get_market_data():
                 crops = []
 
             if not crops:
-                # Live Agmarknet feed genuinely has nothing for this state
-                # right now — report it as empty rather than filling the gap
-                # with fabricated numbers.
-                markets[city] = []
-                empty_cities.append(city)
+                # Live Agmarknet feed genuinely has nothing for this state.
+                # Try history cache as a secondary source before giving up.
+                hist_crops = _build_results_from_history_cache(state)
+                if hist_crops:
+                    city_crops_h = [{**crop, "demand": get_demand(crop["price"], crop["change"])}
+                                    for crop in hist_crops]
+                    city_crops_h.sort(
+                        key=lambda x: ({"Very High": 3, "High": 2, "Medium": 1, "Low": 0}.get(x["demand"], 0), x["price"]),
+                        reverse=True
+                    )
+                    markets[city] = city_crops_h
+                    hist_date = _get_history_last_updated(state)
+                    city_meta[city] = {
+                        "data_status":  "history",
+                        "last_updated": hist_date or "",
+                    }
+                    history_cities.append(city)
+                else:
+                    markets[city] = []
+                    city_meta[city] = {"data_status": "no_data", "last_updated": ""}
+                    no_data_cities.append(city)
                 continue
+
+            # Check whether the results actually came from live API or
+            # from the history cache fallback path inside fetch_agmarknet_prices.
+            first_source = crops[0].get("source", "") if crops else ""
+            is_live_source = (first_source == "agmarknet_live")
 
             city_crops = []
             for crop in crops:
@@ -1551,31 +1644,102 @@ def get_market_data():
                 reverse=True
             )
             markets[city] = city_crops
-            live_total += len(city_crops)
+
+            if is_live_source:
+                live_total += len(city_crops)
+                # Determine last_updated from the most recent arrival_date
+                live_date = max(
+                    (c.get("arrival_date", "") or "" for c in city_crops),
+                    default=""
+                )
+                if not live_date:
+                    live_date = now_iso[:10]  # today's date as fallback
+                city_meta[city] = {"data_status": "live", "last_updated": live_date}
+                live_cities.append(city)
+            else:
+                # fetch_agmarknet_prices fell back to history cache internally
+                hist_date = _get_history_last_updated(state)
+                city_meta[city] = {"data_status": "history", "last_updated": hist_date or ""}
+                history_cities.append(city)
+
+
+        # Sort: live first, then history, then no_data
+        ordered_cities = live_cities + history_cities + no_data_cities
+        ordered_markets = {c: markets[c] for c in ordered_cities if c in markets}
 
         return jsonify({
-            "markets":      markets,
-            "locations":    list(markets.keys()),
+            "markets":      ordered_markets,
+            "locations":    ordered_cities,
             "live_count":   live_total,
-            "empty_cities": empty_cities,
-            "fetched_at":   datetime.now().isoformat(),
+            "live_cities":  live_cities,
+            "history_cities": history_cities,
+            "no_data_cities": no_data_cities,
+            "city_meta":    city_meta,
+            "fetched_at":   now_iso,
             "data_source":  "Agmarknet — Ministry of Agriculture & Farmers Welfare, Govt. of India (data.gov.in)",
         })
 
     except Exception as e:
         # Something unexpected blew up (network, parsing, threading, etc).
-        # Report the failure honestly instead of masking it with fabricated
-        # data — the frontend should show a clear "couldn't load live data"
-        # state rather than numbers that look real but aren't.
-        logger.warning(f"[Market] /api/market failed: {e}")
+        # Fall back to the persisted history cache so the market page still
+        # shows meaningful data instead of a blank/error state.
+        logger.warning(f"[Market] /api/market failed: {e} — attempting history cache fallback")
+        try:
+            fallback_markets = {}
+            fallback_meta = {}
+            fallback_live = []
+            fallback_hist = []
+            fallback_no = []
+            fallback_total = 0
+            unique_states_fb = sorted({CITY_STATE.get(c, "") for c in cities if CITY_STATE.get(c, "")})
+            for state_fb in unique_states_fb:
+                fb_crops = _build_results_from_history_cache(state_fb)
+                hist_date_fb = _get_history_last_updated(state_fb)
+                for city_fb in cities:
+                    if CITY_STATE.get(city_fb, "") != state_fb:
+                        continue
+                    if fb_crops:
+                        city_crops_fb = [{**crop, "demand": get_demand(crop["price"], crop["change"])} for crop in fb_crops]
+                        city_crops_fb.sort(
+                            key=lambda x: ({"Very High": 3, "High": 2, "Medium": 1, "Low": 0}.get(x["demand"], 0), x["price"]),
+                            reverse=True
+                        )
+                        fallback_markets[city_fb] = city_crops_fb
+                        fallback_meta[city_fb] = {"data_status": "history", "last_updated": hist_date_fb or ""}
+                        fallback_hist.append(city_fb)
+                        fallback_total += len(city_crops_fb)
+                    else:
+                        fallback_markets[city_fb] = []
+                        fallback_meta[city_fb] = {"data_status": "no_data", "last_updated": ""}
+                        fallback_no.append(city_fb)
+            ordered_fb = fallback_hist + fallback_no
+            if fallback_total > 0:
+                logger.info(f"[Market] History cache fallback served {fallback_total} commodities across {len(fallback_markets)} cities")
+                return jsonify({
+                    "markets":        {c: fallback_markets[c] for c in ordered_fb if c in fallback_markets},
+                    "locations":      ordered_fb,
+                    "live_count":     0,
+                    "live_cities":    [],
+                    "history_cities": fallback_hist,
+                    "no_data_cities": fallback_no,
+                    "city_meta":      fallback_meta,
+                    "fetched_at":     now_iso,
+                    "data_source":    "Agmarknet — Ministry of Agriculture & Farmers Welfare, Govt. of India (data.gov.in) [cached]",
+                    "note":           "Showing cached market data (live API unavailable).",
+                })
+        except Exception as fb_e:
+            logger.warning(f"[Market] History cache fallback also failed: {fb_e}")
         return jsonify({
-            "markets":     {},
-            "locations":   [],
-            "live_count":  0,
-            "empty_cities": cities,
-            "fetched_at":  datetime.now().isoformat(),
-            "data_source": "Agmarknet — Ministry of Agriculture & Farmers Welfare, Govt. of India (data.gov.in)",
-            "error":       "Could not fetch live market data right now. Please try again shortly.",
+            "markets":        {},
+            "locations":      [],
+            "live_count":     0,
+            "live_cities":    [],
+            "history_cities": [],
+            "no_data_cities": cities,
+            "city_meta":      {},
+            "fetched_at":     now_iso,
+            "data_source":    "Agmarknet — Ministry of Agriculture & Farmers Welfare, Govt. of India (data.gov.in)",
+            "error":          "Could not fetch live market data right now. Please try again shortly.",
         }), 502
 
 
@@ -1670,7 +1834,7 @@ def _gemini_chat_reply(system_prompt, messages):
             "generationConfig": {"temperature": 0.5, "maxOutputTokens": 700},
         }
         resp = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
             headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
             json=body, timeout=30
         )
@@ -1823,33 +1987,12 @@ _RECOGNISED_CITIES = sorted(CITY_STATE.keys(), key=len, reverse=True)
 # CITY_STATE under their current official name, plus Devanagari-script
 # names for the most common major cities — a farmer typing in actual
 # Hindi script (not just Hinglish) should still be recognized.
-_CHAT_CITY_ALIASES = {
-    "calcutta": "Kolkata",
-    "bombay": "Mumbai",
-    "madras": "Chennai",
-    "bangalore": "Bengaluru",
-    "new delhi": "Delhi",
-    "दिल्ली": "Delhi",
-    "मुंबई": "Mumbai",
-    "बॉम्बे": "Mumbai",
-    "कोलकाता": "Kolkata",
-    "कलकत्ता": "Kolkata",
-    "चेन्नई": "Chennai",
-    "हैदराबाद": "Hyderabad",
-    "पुणे": "Pune",
-    "अहमदाबाद": "Ahmedabad",
-    "लखनऊ": "Lucknow",
-    "जयपुर": "Jaipur",
-    "भोपाल": "Bhopal",
-    "पटना": "Patna",
-    "नागपुर": "Nagpur",
-    "इंदौर": "Indore",
-    "सूरत": "Surat",
-    "कानपुर": "Kanpur",
-    "अमृतसर": "Amritsar",
-    "वाराणसी": "Varanasi",
-    "आगरा": "Agra",
-}
+try:
+    with open("chat_city_aliases.json", "r", encoding="utf-8") as f:
+        _CHAT_CITY_ALIASES = json.load(f)
+except Exception as e:
+    logger.warning(f"Failed to load chat_city_aliases.json: {e}")
+    _CHAT_CITY_ALIASES = {}
 
 
 def _chat_detect_city(text: str):
@@ -1857,10 +2000,18 @@ def _chat_detect_city(text: str):
         return None
     low = text.lower()
     for alias, city in _CHAT_CITY_ALIASES.items():
-        if alias in low:
+        a_low = alias.lower()
+        if a_low.isascii():
+            if re.search(r'\b' + re.escape(a_low) + r'\b', low):
+                return city
+        elif a_low in low:
             return city
     for city in _RECOGNISED_CITIES:
-        if city.lower() in low:
+        c_low = city.lower()
+        if c_low.isascii():
+            if re.search(r'\b' + re.escape(c_low) + r'\b', low):
+                return city
+        elif c_low in low:
             return city
     return None
 
@@ -1891,8 +2042,13 @@ _CHAT_COMMODITY_ALIASES = {
 def _chat_detect_commodity(text: str):
     low = (text or "").lower()
     for name, aliases in _CHAT_COMMODITY_ALIASES.items():
-        if any(a in low for a in aliases):
-            return name
+        for a in aliases:
+            a_low = a.lower()
+            if a_low.isascii():
+                if re.search(r'\b' + re.escape(a_low) + r'\b', low):
+                    return name
+            elif a_low in low:
+                return name
     return None
 
 
@@ -1963,7 +2119,7 @@ def _chat_alerts_tool(city_hint, lat, lon):
 
 
 def _chat_fetch_market_rows(state, commodity=None):
-    """Three-tier market lookup so a chat price question never hangs or comes back empty: 1. Shared cache (instant, same cache /api/market already uses) 2. A fresh live fetch, capped to 6s so chat stays responsive even if the government feed is slow 3. If both fail, return [] honestly rather than fabricating a price — the reply will fall back to general advice instead."""
+    """Three-tier market lookup so a chat price question never hangs or comes back empty: 1. Shared cache (instant, same cache /api/market already uses) 2. A fresh live fetch, capped to 10s so chat stays responsive even if the government feed is slow 3. If both fail, return [] honestly rather than fabricating a price — the reply will fall back to general advice instead."""
     now = time.monotonic()
     cached = _agmark_fetch_cache.get(state)
     if cached and (now - cached[0]) < AGMARK_CACHE_TTL_SEC:
@@ -1973,7 +2129,7 @@ def _chat_fetch_market_rows(state, commodity=None):
         try:
             with ThreadPoolExecutor(max_workers=1) as ex:
                 fut = ex.submit(fetch_agmarknet_prices, state)
-                rows = fut.result(timeout=6)
+                rows = fut.result(timeout=10)
         except Exception as e:
             logger.warning(f"[ChatGateway] live market fetch timed out/failed for {state}: {e}")
             rows = None
@@ -1983,7 +2139,8 @@ def _chat_fetch_market_rows(state, commodity=None):
 
     if commodity:
         filtered = [r for r in rows
-                    if commodity.lower() in str(r.get("crop", "")).lower()]
+                    if commodity.lower() in str(r.get("crop", "")).lower()
+                    or commodity.lower() in str(r.get("crop_key", "")).lower()]
         if filtered:
             rows = filtered
 
@@ -2037,30 +2194,68 @@ def _chat_run_gateway(intents, context_data, message_text=""):
     named_city = _chat_detect_city(message_text)
     commodity = _chat_detect_commodity(message_text)
 
-    # For the market tool specifically: Agmarknet's API filters by STATE
-    # name, not city. "Lucknow" would silently return zero records — it
-    # needs to resolve to "Uttar Pradesh" first. Open-Meteo's geocoding
-    # response includes admin1 (the state) alongside lat/lon, so reuse
-    # that instead of passing the raw city name straight through.
+    # Resolve state: first check local city mapping, then geocoding
     named_state = None
     if named_city:
-        geo = _geocode_city(named_city)
-        if geo and geo.get("state"):
-            named_state = geo["state"]
+        if named_city in CITY_STATE:
+            named_state = CITY_STATE[named_city]
+        else:
+            geo = _geocode_city(named_city)
+            if geo and geo.get("state"):
+                named_state = geo["state"]
     state = named_state or context_data.get("state") or city
 
     sections = []
     summaries = []
 
-    if "market" in intents and state:
-        res = _chat_market_tool(state, commodity)
-        if res.get("ok"):
-            lines = "; ".join(
-                f"{r.get('crop', '?')}: ₹{r.get('price', '?')}/quintal"
-                for r in res["rows"]
-            )
-            sections.append(f"[LIVE MANDI PRICES for {state}] {lines}")
-            summaries.append(f"💰 Live prices for {state}: {lines}")
+    all_markets = context_data.get("all_markets") or {}
+    if "market" in intents:
+        market_found = False
+        target_city = named_city or city or context_data.get("market_city") or ""
+        # 1. Check if we have app data for this city in all_markets
+        if target_city and target_city in all_markets and all_markets[target_city]:
+            city_rows = all_markets[target_city]
+            if commodity:
+                filtered = [r for r in city_rows if commodity.lower() in str(r.get("crop", "")).lower() or commodity.lower() in str(r.get("crop_key", "")).lower()]
+                if filtered:
+                    city_rows = filtered
+            if city_rows:
+                lines = "; ".join(f"{r.get('crop', '?')}: ₹{r.get('price', r.get('modal_price', '?'))}/quintal ({r.get('market', target_city + ' APMC')})" for r in city_rows[:6])
+                sections.append(f"[APP MARKET DATA for {target_city}] {lines}")
+                summaries.append(f"💰 Market prices for {target_city}: {lines}")
+                market_found = True
+
+        # 2. Check live market tool for state
+        if not market_found and state:
+            res = _chat_market_tool(state, commodity)
+            if res.get("ok"):
+                lines = "; ".join(
+                    f"{r.get('crop', '?')}: ₹{r.get('price', '?')}/quintal ({r.get('market', state)})"
+                    for r in res["rows"]
+                )
+                sections.append(f"[LIVE MANDI PRICES for {state}{' (' + target_city + ')' if target_city else ''}] {lines}")
+                summaries.append(f"💰 Live prices for {state}: {lines}")
+                market_found = True
+
+        # 3. Fallback: check other cities in all_markets or MSP
+        if not market_found and commodity:
+            found_any = []
+            for c_name, c_rows in all_markets.items():
+                for r in c_rows:
+                    if commodity.lower() in str(r.get("crop", "")).lower():
+                        found_any.append(f"{c_name}: ₹{r.get('price', '?')}/quintal")
+                        break
+                if len(found_any) >= 3:
+                    break
+            if found_any:
+                lines = "; ".join(found_any)
+                sections.append(f"[CURRENT MARKET RATES for {commodity}] {lines}")
+                summaries.append(f"💰 Market rates for {commodity}: {lines}")
+                market_found = True
+            elif commodity in _MSP_RATES:
+                msp_val = _MSP_RATES[commodity]
+                sections.append(f"[GOVT MSP REFERENCE for {commodity}] Minimum Support Price is ₹{msp_val}/quintal")
+                summaries.append(f"💰 Govt MSP for {commodity}: ₹{msp_val}/quintal")
 
     if "crops" in intents:
         res = _chat_crops_tool(temp, humidity, rain, city, lat, lon)
@@ -2093,7 +2288,34 @@ def _chat_run_gateway(intents, context_data, message_text=""):
     return sections, summaries
 
 
+def _ensure_reply_punctuation(text: str) -> str:
+    """Post-process a chatbot reply to ensure every bullet-point line ends
+    with a full stop. The system prompt instructs the model to do this, but
+    LLMs occasionally omit punctuation — this is a server-side safety net so
+    the TTS speaker always gets clean sentence boundaries and pauses correctly
+    between bullet points instead of running them together.
+    Punctuation characters that already terminate the line correctly are left
+    unchanged. Only lines that start with a bullet marker (•) are checked,
+    so regular prose sentences and Markdown links are never altered."""
+    if not text:
+        return text
+    # Characters that already give the TTS engine a natural pause
+    _VALID_ENDS = {'.', '!', '?', '।', '۔', '。', '।', '।'}
+    lines = text.split('\n')
+    fixed = []
+    for line in lines:
+        stripped = line.rstrip()
+        if stripped.startswith('•') and stripped:
+            # Don't touch lines that are just a bullet marker or contain only a link
+            last_char = stripped[-1] if stripped else ''
+            if last_char not in _VALID_ENDS:
+                stripped = stripped + '.'
+        fixed.append(stripped)
+    return '\n'.join(fixed)
+
+
 @app.route("/api/chat", methods=["POST"])
+
 def kisan_chat():
     model = "openai/gpt-oss-120b"   # replaces deprecated llama-3.3-70b-versatile (shut down 08/16/26)
 
@@ -2166,6 +2388,39 @@ def kisan_chat():
         city = temp = humidity = rain = ""
         lat = lon = ""
 
+    # ── Inject last diagnose result (from Diagnose page) ─────────────────────
+    diagnose_ctx = data.get("diagnose_context") or {}
+    diagnose_block = ""
+    if diagnose_ctx and diagnose_ctx.get("disease"):
+        d_disease  = diagnose_ctx.get("disease", "Unknown")
+        d_severity = diagnose_ctx.get("severity", "")
+        d_conf     = diagnose_ctx.get("confidence", "")
+        d_cause    = diagnose_ctx.get("cause", "")
+        d_timeline = diagnose_ctx.get("recovery_timeline", "")
+        d_eco      = ", ".join(r.get("remedy", "") for r in (diagnose_ctx.get("eco_remedies") or [])[:3])
+        d_chem     = ", ".join(c.get("name", "") for c in (diagnose_ctx.get("chemical_remedies") or [])[:2])
+        diagnose_block  = "\n\nFARMER'S RECENT CROP DIAGNOSIS (from Diagnose page):\n"
+        diagnose_block += f"• Identified Disease: {d_disease}\n"
+        if d_severity:  diagnose_block += f"• Severity: {d_severity}\n"
+        if d_conf:      diagnose_block += f"• Confidence: {d_conf}%\n"
+        if d_cause:     diagnose_block += f"• Cause: {d_cause}\n"
+        if d_timeline:  diagnose_block += f"• Recovery Timeline: {d_timeline}\n"
+        if d_eco:       diagnose_block += f"• Recommended Eco Remedies: {d_eco}\n"
+        if d_chem:      diagnose_block += f"• Chemical Options: {d_chem}\n"
+        diagnose_block += "INSTRUCTION: The user is asking about their recent crop diagnosis. Use this data directly to explain the disease, severity, and treatments. Do NOT say you cannot find or retrieve the diagnosis data."
+
+    # ── Inject current market data (from Market page) ─────────────────────────
+    market_ctx = data.get("market_context") or {}
+    market_block = ""
+    m_city = market_ctx.get("city", "")
+    m_items = market_ctx.get("commodities") or []
+    if m_items:
+        m_lines = "; ".join(
+            f"{c.get('crop','?')}: ₹{c.get('price','?')}/quintal"
+            for c in m_items[:12]
+        )
+        market_block = f"\n\nCURRENT MARKET PRICES (from Market page{', ' + m_city if m_city else ''}):\n{m_lines}\nINSTRUCTION: Use these prices if the farmer asks about current rates, what to sell, or market prices."
+
     # ── Tool-calling gateway: detect intent, fetch LIVE data, inject as context ──
     intents = _chat_detect_intents(last_user_msg)
     gateway_summaries = []
@@ -2174,25 +2429,30 @@ def kisan_chat():
             "city": city, "lat": lat, "lon": lon,
             "temp": temp, "humidity": humidity, "rain": rain,
             "state": city,  # fetch_agmarknet_prices resolves common city/state names internally
+            "all_markets": market_ctx.get("allMarkets") or {},
+            "market_city": m_city,
         }, message_text=last_user_msg)
         if gateway_sections:
             location_block += "\n\n" + "\n".join(gateway_sections)
 
-    system_prompt = f"""You are Kisan Helper, a smart AI assistant for Indian farmers in the SmartAgro app. Answer ONLY: Agriculture, Crops, Soil, Pest Control, Fertilizers, Irrigation, Water Management, Govt schemes (PM-KISAN, PMFBY, KCC), SmartAgro app features. For anything unrelated, politely refuse in {lang_name}. Answer in {lang_name} (native script). Be SHORT and COMPLETE: max 4-5 bullet points or 3 sentences. Never leave an answer unfinished. App Navigation: If the user asks about checking features, provide direct Markdown links to navigate there. Use EXACTLY these formats: • Dashboard/Home/Location: [Dashboard](/) • Crop Health/Disease/Upload Photo: [Diagnose Crop](/diagnose) • Market Prices/Mandi: [Market Prices](/market) • Weather Alerts/Forecast: [Alerts](/alerts). No markdown headers (#, ##). No asterisks for bullets, use • instead. FORMATTING: Never use a hyphen or dash character (-, –, —) anywhere in your reply, not as a bullet marker, not inside or between words, and not to join a sentence. Where you would normally use a dash to join a thought, use a period, comma, or the word "and" instead. Write compound words as either one word or two separate words instead of hyphenating them.{location_block} SOIL KNOWLEDGE: You know about soil types (clay, loamy, sandy, silt, black, red, alluvial, laterite), pH levels, nutrients (NPK), organic matter, soil testing, and which crops suit which soil. APP SECTION RULES, only suggest a section when it is DIRECTLY relevant: • Suggest [Diagnose Crop](/diagnose) ONLY if the user asks about crop disease, leaf spots, pest infestation, plant infection, or crop health problems. • Suggest [Market Prices](/market) ONLY if the user asks about mandi rates, selling price, MSP, commodity prices, or where to sell crops. • Suggest [Dashboard](/) ONLY if the user asks about weather forecast, rain, temperature, or local weather conditions. • Suggest [Alerts](/alerts) ONLY if the user asks about severe weather warnings, flood, frost, storm, or pest outbreak warnings. • Mention the Helpline (1800 180 1551, bottom left button) ONLY if the user needs expert phone support. • For general farming questions (how to grow, fertilizer, irrigation, soil, seasons), answer directly WITHOUT suggesting any app section unless it truly helps. LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or questions about their location, use the FARMER'S CURRENT LOCATION & WEATHER data above to give a specific, direct answer. RESTRICTED CROPS: Never give cultivation advice, growing steps, or encouragement for tobacco, opium poppy, cannabis/hemp, or other controlled/licensed only crops, even if agronomically asked about or technically legal with a special government license. If asked, briefly note that this app focuses on common food and commercial crops and doesn't advise on licensed/controlled crops, then offer to help with a suitable alternative crop for their location instead."""
+    # Append diagnose and market blocks to location_block so they flow into the prompt
+    location_block += diagnose_block + market_block
+
+    system_prompt = f"""You are Kisan Helper, a smart AI assistant for Indian farmers in the SmartAgro app. Answer ONLY: Agriculture, Crops, Soil, Pest Control, Fertilizers, Irrigation, Water Management, Govt schemes (PM-KISAN, PMFBY, KCC), SmartAgro app features. For anything unrelated, politely refuse in {lang_name}. Answer in {lang_name} (native script). Be CONCISE and HELPFUL: give exactly 4 to 5 bullet points or 2 to 3 short sentences. Keep each bullet point brief and to the point. Never leave an answer unfinished. App Navigation: If the user asks about checking features, provide direct Markdown links to navigate there. Use EXACTLY these formats: • Dashboard/Home/Location: [Dashboard](/) • Crop Health/Disease/Upload Photo: [Diagnose Crop](/diagnose) • Market Prices/Mandi: [Market Prices](/market) • Weather Alerts/Forecast: [Alerts](/alerts). No markdown headers (#, ##). No asterisks for bullets, use • instead. PUNCTUATION RULES (CRITICAL): Every bullet point MUST end with a full stop (period). Every sentence MUST end with a full stop. When listing items inside a sentence, separate them with commas and end the last item with a full stop. This is essential because a text-to-speech speaker reads the reply aloud and needs proper punctuation to pause between points. Never write a bullet point or sentence without a terminating full stop. Example of correct format: • Apply neem oil spray at a dilution of 5 ml per litre of water. • Irrigate the field every 3 to 5 days depending on the soil moisture. FORMATTING: Never use a hyphen or dash character (-, –, —) anywhere in your reply, not as a bullet marker, not inside or between words, and not to join a sentence. For number ranges like 5 to 10 or 2 to 3 weeks, always write the word to in between, never use a hyphen. Where you would normally use a dash to join a thought, use a period, comma, or the word and instead. Write compound words as either one word or two separate words instead of hyphenating them.{location_block} SOIL KNOWLEDGE: You know about soil types (clay, loamy, sandy, silt, black, red, alluvial, laterite), pH levels, nutrients (NPK), organic matter, soil testing, and which crops suit which soil. APP SECTION RULES, only suggest a section when it is DIRECTLY relevant: • Suggest [Diagnose Crop](/diagnose) ONLY if the user asks about crop disease, leaf spots, pest infestation, plant infection, or crop health problems. • Suggest [Market Prices](/market) ONLY if the user asks about mandi rates, selling price, MSP, commodity prices, or where to sell crops. • Suggest [Dashboard](/) ONLY if the user asks about weather forecast, rain, temperature, or local weather conditions. • Suggest [Alerts](/alerts) ONLY if the user asks about severe weather warnings, flood, frost, storm, or pest outbreak warnings. • Mention the Helpline (1800 180 1551, bottom left button) ONLY if the user needs expert phone support. • For general farming questions (how to grow, fertilizer, irrigation, soil, seasons), answer directly WITHOUT suggesting any app section unless it truly helps. LOCATION ANSWERS: If the farmer asks what to grow, is this good weather, or questions about their location, use the FARMER'S CURRENT LOCATION & WEATHER data above to give a specific, direct answer. DIAGNOSE ANSWERS: If the farmer asks about their crop disease, remedy, or recently diagnosed crop, ALWAYS use the FARMER'S RECENT CROP DIAGNOSIS data above to give full details about the diagnosed disease, severity, cause, and treatments. Never say you don't know or don't have access to it. MARKET ANSWERS: If the farmer asks about current prices, what to sell, or market rates (including for any specific city or crop), ALWAYS use the CURRENT MARKET PRICES, APP MARKET DATA, or LIVE MANDI PRICES data above to give real figures. RESTRICTED CROPS: Never give cultivation advice, growing steps, or encouragement for tobacco, opium poppy, cannabis/hemp, or other controlled/licensed only crops, even if agronomically asked about or technically legal with a special government license. If asked, briefly note that this app focuses on common food and commercial crops and doesn't advise on licensed/controlled crops, then offer to help with a suitable alternative crop for their location instead."""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
         "model":       model,
         "messages":    [{"role": "system", "content": system_prompt}] + messages,
         "temperature": 0.5,
-        "max_tokens":  700,
+        "max_tokens":  550,
         "stream":      False
     }
     try:
         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=30)
         if resp.status_code == 200:
             res_json = resp.json()
-            reply = res_json["choices"][0]["message"]["content"].strip()
+            reply = _ensure_reply_punctuation(res_json["choices"][0]["message"]["content"].strip())
             if gateway_summaries:
                 reply += "\n\n" + "\n".join(gateway_summaries)
             return jsonify({"reply": reply})
@@ -2204,6 +2464,7 @@ def kisan_chat():
         logger.info(f"[Chat] Groq returned {resp.status_code}, trying Gemini fallback")
         gemini_reply = _gemini_chat_reply(system_prompt, messages)
         if gemini_reply:
+            gemini_reply = _ensure_reply_punctuation(gemini_reply)
             if gateway_summaries:
                 gemini_reply += "\n\n" + "\n".join(gateway_summaries)
             return jsonify({"reply": gemini_reply})
@@ -2213,6 +2474,7 @@ def kisan_chat():
         logger.warning(f"[Chat error] {e} — trying Gemini fallback")
         gemini_reply = _gemini_chat_reply(system_prompt, messages)
         if gemini_reply:
+            gemini_reply = _ensure_reply_punctuation(gemini_reply)
             if gateway_summaries:
                 gemini_reply += "\n\n" + "\n".join(gateway_summaries)
             return jsonify({"reply": gemini_reply})
@@ -2285,7 +2547,7 @@ _rate_limit_state_lock = threading.Lock()
 
 CHAT_LIMIT    = 20
 STT_LIMIT     = 20
-DIAGNOSE_LIMIT = 10
+DIAGNOSE_LIMIT = 20  # allow re-analysis and multiple crops per session
 
 
 def _rate_limit(action: str, ip: str, limit: int, window_seconds: int = 60) -> bool:
@@ -2315,14 +2577,29 @@ def _is_rate_limited_diagnose(ip: str) -> bool:
 # ─── Diagnose Crop via ensemble (Groq + Gemini) ───────────────────────────────
 MAX_IMAGE_B64_LEN = 14 * 1024 * 1024  # ~10 MB raw image
 
-# Vision-capable models tried per ensemble pass. Today Groq only has one
-# production-viable multimodal model on the general tier — meta-llama/llama-4-
-# scout-17b-16e-instruct was deprecated June 17, 2026. Add a second entry here
-# as soon as one exists; no other code needs to change.
+# Confirmed Groq vision model (Sep 2026): qwen/qwen3.8-27b is the only
+# general-tier multimodal model with image support on GroqCloud.
+# NOTE: qwen/qwen3.6-27b does NOT exist — causes 404. Only 3.8 is valid.
 vision_models = [
-    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
 ]
 
+# Gemini model waterfall — tried in order until one succeeds.
+# gemini-3.6-flash: primary — confirmed working, good quota (Sep 2026).
+# gemini-3.5-flash: secondary Gemini — activates instantly if primary 503s (< 1s fail).
+# gemini-3.5-flash-lite: EXCLUDED — caused genuine 30s hangs (not fast 503).
+GEMINI_MODEL_WATERFALL = [
+    GEMINI_DIAGNOSIS_MODEL,   # gemini-3.6-flash — PRIMARY Gemini
+    "gemini-3.5-flash",       # SECONDARY Gemini (fast-failing fallback)
+]
+
+# ── Gemini quota-exhausted cache ─────────────────────────────────────────────
+# When Gemini returns 429 (quota exceeded), we skip ALL Gemini calls for
+# GEMINI_QUOTA_SKIP_SEC seconds so every request doesn't waste time hitting
+# a known-exhausted endpoint. The flag clears itself automatically.
+_gemini_quota_exhausted_until = 0.0   # epoch timestamp; 0 = not exhausted
+_gemini_quota_lock = threading.Lock()
+GEMINI_QUOTA_SKIP_SEC = 30 * 60       # 30 minutes
 
 def ai_is_crop_image(image_b64):
     """Fast, low-token sanity check BEFORE running the full diagnosis prompt: does this photo actually show a plant/crop part? Without this, the main prompt will happily hallucinate a plausible-sounding disease name for a photo of a hand, a sack of grain, or a selfie — which is worse than useless for a farmer trying to protect a crop. Fails OPEN (assumes "yes, it's a plant") on any error/timeout/missing key, so a flaky classifier call never blocks a genuine diagnosis. Returns (is_plant: bool, reason: str | None)."""
@@ -2353,6 +2630,7 @@ def ai_is_crop_image(image_b64):
             headers=headers, json=body, timeout=8,
         )
         if resp.status_code != 200:
+            logger.warning(f"[Diagnose] ai_is_crop_image HTTP {resp.status_code}: {resp.text[:200]}")
             return True, None
         raw = resp.json()["choices"][0]["message"]["content"].strip()
         parsed = _extract_json_object(raw)
@@ -2365,9 +2643,52 @@ def ai_is_crop_image(image_b64):
         logger.warning(f"[Diagnose] ai_is_crop_image check failed (failing open): {e}")
         return True, None
 
+def _repair_and_parse_json(text):
+    """Robustly parse JSON from LLM output. Tries several repair strategies
+    to survive common model mistakes like missing commas, trailing commas,
+    unescaped control characters, and minor formatting issues.
+    Returns a parsed dict/list, or None if all strategies fail."""
+    # Step 1: strip markdown fences
+    cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
+
+    # Step 2: extract outermost JSON object
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if not match:
+        return None
+    raw = match.group()
+
+    # Step 3: standard parse (fast path — works most of the time)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 4: remove trailing commas before } or ]  (most common LLM mistake)
+    fixed = re.sub(r",\s*([}\]])", r"\1", raw)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 5: strip control characters (\n inside strings breaks JSON)
+    fixed2 = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", fixed)
+    try:
+        return json.loads(fixed2)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 6: last resort — replace literal newlines inside strings
+    fixed3 = re.sub(r'(?<!\\)\n', ' ', fixed2)
+    try:
+        return json.loads(fixed3)
+    except json.JSONDecodeError:
+        return None
+
 
 def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
-    """Run one diagnosis pass against one Groq vision model and return parsed JSON, or None if that pass failed."""
+    """Run one diagnosis pass against the Groq vision model. Retries once on
+    429 (rate-limit) with a short 1-second pause. Fails immediately on 404
+    (model not found) to avoid wasting time."""
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
         "model": model,
@@ -2380,26 +2701,53 @@ def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
         ],
         "temperature": temperature,
         "max_tokens": 1400,
-        "reasoning_effort": "none",
     }
-    resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                          headers=headers, json=body, timeout=45)
-    if resp.status_code != 200:
-        return None
-    raw = resp.json()["choices"][0]["message"]["content"].strip()
-    cleaned = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if not match:
-        return None
-    return json.loads(match.group())
+    for attempt in range(2):
+        try:
+            resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                                  headers=headers, json=body, timeout=15)
+            if resp.status_code == 200:
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                parsed = _repair_and_parse_json(raw)
+                if parsed is None:
+                    logger.warning(f"[Diagnose] Groq ({model}): JSON parse failed after repair attempts")
+                return parsed
+            if resp.status_code == 404:
+                # Model doesn't exist — fail immediately, no retry
+                logger.error(f"[Diagnose] Groq model not found: {model}. "
+                             f"Check vision_models list. {resp.text[:200]}")
+                return None
+            if resp.status_code == 429 and attempt == 0:
+                # Rate limited — log and fail immediately (no sleep).
+                # Gemini runs in parallel and will cover this failure.
+                logger.warning(f"[Diagnose] Groq 429 on {model}, failing fast (Gemini covers).")
+                return None
+            logger.warning(f"[Diagnose] Groq HTTP {resp.status_code} ({model}): {resp.text[:200]}")
+            return None
+        except Exception as e:
+            logger.warning(f"[Diagnose] Groq vision pass exception ({model}): {e}")
+            return None
 
 
 def _run_gemini_pass(image_b64, prompt, sys_prompt):
-    """Run one diagnosis pass against Google's Gemini API and return parsed JSON, or None on any failure. When GEMINI_API_KEY is configured this gives the ensemble a genuinely INDEPENDENT second model (different vendor, different weights) so an agreement between Groq & Gemini is real cross-model evidence."""
+    """Run one diagnosis pass using Gemini's vision API.
+    Tries each model in GEMINI_MODEL_WATERFALL in order — if the primary
+    model returns 503 (overloaded), it instantly falls through to the next
+    model. When quota is exhausted (429), the entire Gemini path is skipped
+    for GEMINI_QUOTA_SKIP_SEC seconds so Groq secondary kicks in immediately.
+    Returns parsed JSON dict on success, or None on all failures."""
     if not GEMINI_API_KEY:
         return None
-    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{GEMINI_DIAGNOSIS_MODEL}:generateContent")
+
+    # ── Quota-exhausted fast-exit ─────────────────────────────────────────
+    global _gemini_quota_exhausted_until
+    with _gemini_quota_lock:
+        remaining = _gemini_quota_exhausted_until - time.time()
+    if remaining > 0:
+        mins = int(remaining / 60) + 1
+        logger.warning(f"[Diagnose] Gemini quota exhausted — skipping for ~{mins}m, Groq covers")
+        return None
+
     body = {
         "system_instruction": {"parts": [{"text": sys_prompt}]},
         "contents": [{
@@ -2409,24 +2757,52 @@ def _run_gemini_pass(image_b64, prompt, sys_prompt):
                 {"text": prompt},
             ],
         }],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 3000,
-                             "responseMimeType": "application/json"},
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 2000,
+            "responseMimeType": "application/json",
+        },
     }
-    try:
-        resp = requests.post(url, headers={"Content-Type": "application/json",
-                            "x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=45)
-        if resp.status_code != 200:
-            logger.warning(f"[Diagnose] Gemini HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        cleaned = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if not match:
-            return None
-        return json.loads(match.group())
-    except Exception as e:
-        logger.warning(f"[Diagnose] Gemini exception: {e}")
-        return None
+    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
+
+    for model_name in GEMINI_MODEL_WATERFALL:
+        url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+               f"{model_name}:generateContent")
+        try:
+            resp = requests.post(url, headers=headers, json=body, timeout=20)
+            if resp.status_code == 200:
+                cands = resp.json().get("candidates", [])
+                if not cands:
+                    logger.warning(f"[Diagnose] Gemini {model_name}: empty candidates")
+                    continue  # try next model
+                raw = cands[0]["content"]["parts"][0]["text"].strip()
+                parsed = _repair_and_parse_json(raw)
+                if parsed is not None:
+                    logger.info(f"[Diagnose] Gemini success with model: {model_name}")
+                    return parsed
+                logger.warning(f"[Diagnose] Gemini {model_name}: JSON parse failed after "
+                               f"repair attempts, trying next model")
+                continue  # try next model
+
+            if resp.status_code == 429:
+                # Quota exhausted — set the skip flag and bail out of the entire
+                # waterfall. No point trying other Gemini models; Groq covers.
+                with _gemini_quota_lock:
+                    _gemini_quota_exhausted_until = time.time() + GEMINI_QUOTA_SKIP_SEC
+                logger.warning(f"[Diagnose] Gemini {model_name} 429 quota exceeded — "
+                               f"skipping Gemini for {GEMINI_QUOTA_SKIP_SEC // 60}m")
+                return None  # skip entire waterfall immediately
+
+            # 503 overloaded / 404 not found / other error → try next model
+            logger.warning(f"[Diagnose] Gemini {model_name} HTTP {resp.status_code}, "
+                           f"trying next model...  {resp.text[:120]}")
+
+        except Exception as e:
+            logger.warning(f"[Diagnose] Gemini {model_name} exception: {e}")
+            # continue to next model
+
+    logger.warning("[Diagnose] All Gemini models in waterfall exhausted")
+    return None
 
 
 def _diseases_agree(name_a, name_b):
@@ -2468,8 +2844,8 @@ def _log_diagnosis(record):
 
 @app.route("/api/diagnose", methods=["POST"])
 def diagnose_crop():
-    if not GROQ_API_KEY:
-        return jsonify({"error": "GROQ_API_KEY not set in .env"}), 500
+    if not GROQ_API_KEY and not GEMINI_API_KEY:
+        return jsonify({"error": "No vision API keys configured. Set GROQ_API_KEY or GEMINI_API_KEY in .env"}), 500
 
     ip = request.remote_addr or "unknown"
     if _is_rate_limited_diagnose(ip):
@@ -2520,53 +2896,42 @@ def diagnose_crop():
     if lang != "en" and lang_name:
         sys_prompt += f" All free-text values must be in {lang_name}."
 
-    # ── Step 2: ensemble / self-consistency passes ──────────────────────
-    # With a single Groq vision model configured (today's reality) this runs
-    # that model twice at different temperatures as a self-consistency
-    # cross-check. When a Gemini key is configured, a genuinely INDEPENDENT
-    # second model is appended to the ensemble — so an agreement between
-    # Groq & Gemini is real cross-model evidence.
-    pass_temperatures = [0.2, 0.6, 0.9]
-    pass_plan = [
-        (i, vision_models[i % len(vision_models)], pass_temperatures[i % len(pass_temperatures)])
-        for i in range(ENSEMBLE_PASSES)
-    ]
-    if GEMINI_API_KEY:
-        pass_plan.append((len(pass_plan), "gemini", 0.3))
-    pass_outcomes = [None] * len(pass_plan)
-
-    def _run_pass(i, model, temp):
-        try:
-            if model == "gemini":
-                return _run_gemini_pass(image_b64, prompt, sys_prompt)
-            return _run_vision_pass(image_b64, prompt, sys_prompt, model, temp)
-        except Exception as e:
-            logger.warning(f"[Diagnose] pass {i} ({model}) failed: {e}")
-            return None
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(pass_plan)) as executor:
-        future_to_pass = {
-            executor.submit(_run_pass, i, model, temp): (i, model)
-            for i, model, temp in pass_plan
-        }
-        for future in concurrent.futures.as_completed(future_to_pass):
-            i, model = future_to_pass[future]
-            parsed = future.result()
-            if parsed and parsed.get("disease"):
-                pass_outcomes[i] = (parsed, model)
-
+    # ── Step 2: Gemini PRIMARY → Groq SECONDARY ──────────────────────────────
+    # Gemini (gemini-3.6-flash) is the primary model, with gemini-3.5-flash
+    # as the secondary Gemini fallback. Groq (qwen/qwen3.8-27b) activates only
+    # if ALL Gemini models in the waterfall fail.
     results, models_used = [], []
     gemini_display = f"gemini:{GEMINI_DIAGNOSIS_MODEL}"
-    for outcome in pass_outcomes:
-        if outcome is not None:
-            parsed, model = outcome
-            results.append(parsed)
-            models_used.append(gemini_display if model == "gemini" else model)
+
+    # ── PRIMARY: Gemini ───────────────────────────────────────────────────────
+    if GEMINI_API_KEY:
+        try:
+            gemini_res = _run_gemini_pass(image_b64, prompt, sys_prompt)
+            if gemini_res and gemini_res.get("disease"):
+                results.append(gemini_res)
+                models_used.append(gemini_display)
+                logger.info(f"[Diagnose] ✓ PRIMARY Gemini ({GEMINI_DIAGNOSIS_MODEL}) succeeded")
+            else:
+                logger.info(f"[Diagnose] ✗ PRIMARY Gemini failed — activating Groq secondary...")
+        except Exception as e:
+            logger.warning(f"[Diagnose] PRIMARY Gemini exception: {e} — activating Groq secondary...")
+
+    # ── SECONDARY: Groq (activates immediately if Gemini failed) ─────────────
+    if not results and GROQ_API_KEY:
+        try:
+            groq_res = _run_vision_pass(image_b64, prompt, sys_prompt, vision_models[0], 0.2)
+            if groq_res and groq_res.get("disease"):
+                results.append(groq_res)
+                models_used.append(f"groq:{vision_models[0]}")
+                logger.info(f"[Diagnose] ✓ SECONDARY Groq ({vision_models[0]}) succeeded")
+            else:
+                logger.info(f"[Diagnose] ✗ SECONDARY Groq also failed")
+        except Exception as e:
+            logger.warning(f"[Diagnose] SECONDARY Groq exception: {e}")
+
 
     if not results:
-        if not GEMINI_API_KEY:
-            return jsonify({"error": "GEMINI_API_KEY not set in .env"}), 500
-        return jsonify({"error": "All vision models failed. Check your GROQ_API_KEY in .env"}), 500
+        return jsonify({"error": "All vision models failed. Check your API keys in .env"}), 500
 
     # ── Step 3: merge / vote across passes ───────────────────────────────
     primary = max(results, key=lambda r: r.get("confidence", 0))
@@ -3151,7 +3516,7 @@ TRANSLATE_MODELS = [
     "qwen/qwen3.6-27b",      # fallback 2: genuinely different model, not just a repeat of primary
 ]
 TRANSLATE_CHUNK_SIZE = 40   
-TRANSLATE_MAX_WORKERS = 4  
+TRANSLATE_MAX_WORKERS = 4   
 TRANSLATE_STAGGER_SEC = 0.15 
 # NOTE: this used to be 1.5s. With 4 worker threads all calling the SAME
 # model, a 1.5s minimum gap between calls forces them back into near-serial
@@ -3248,48 +3613,46 @@ def _build_translate_prompt(terms_chunk, lang_name, domain_note, lang_code=""):
 
 def _translate_terms_chunk(terms_chunk, lang_name, domain_note, lang_code=""):
     prompt = _build_translate_prompt(terms_chunk, lang_name, domain_note, lang_code)
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    sys_prompt = f"You are an expert Indian regional language translator. You MUST respond with valid JSON only, no other text. Translate everything to {lang_name} ({lang_code}) using its correct native script."
     max_tokens = min(4096, 300 + len(terms_chunk) * 150)
 
-    last_error = None
-    for model in TRANSLATE_MODELS:
-        body = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": f"You are an expert Indian regional language translator. You MUST respond with valid JSON only, no other text. Translate everything to {lang_name} ({lang_code}) using its correct native script."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.1,
-            "max_tokens": max_tokens,
-            "stream": False,
-            "response_format": {"type": "json_object"},
-        }
-        try:
-            resp = _post_to_groq(body, headers)
-            if resp.status_code == 400:
-                body.pop("response_format", None)
-                resp = _post_to_groq(body, headers)
-            if resp.status_code != 200:
-                last_error = f"HTTP {resp.status_code}: {resp.text[:150]}"
-                continue
+    if not GEMINI_API_KEY:
+        logger.warning(f"[Translate] GEMINI_API_KEY not set")
+        return {term: term for term in terms_chunk}
 
-            raw = resp.json()["choices"][0]["message"]["content"].strip()
-            translations = _extract_json_object(raw)
-            if not translations:
-                last_error = "No JSON found/parsable in response"
-                continue
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    body = {
+        "system_instruction": {"parts": [{"text": sys_prompt}]},
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": prompt}],
+        }],
+        "generationConfig": {
+            "temperature": 0.1, 
+            "maxOutputTokens": max_tokens,
+            "responseMimeType": "application/json"
+        },
+    }
+    
+    try:
+        resp = requests.post(url, headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=45)
+        if resp.status_code != 200:
+            logger.warning(f"[Translate] Gemini HTTP {resp.status_code}: {resp.text[:150]}")
+            return {term: term for term in terms_chunk}
+            
+        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        translations = _extract_json_object(raw)
+        if not translations:
+            logger.warning("[Translate] No JSON found/parsable in response")
+            return {term: term for term in terms_chunk}
 
-            for term in terms_chunk:
-                if term not in translations or not translations[term]:
-                    translations[term] = term
-            return translations
-
-        except Exception as e:
-            last_error = str(e)
-            continue
-
-    logger.warning(f"[Translate] chunk of {len(terms_chunk)} terms to {lang_name} failed on all models: {last_error}")
-    return {term: term for term in terms_chunk}
+        for term in terms_chunk:
+            if term not in translations or not translations[term]:
+                translations[term] = term
+        return translations
+    except Exception as e:
+        logger.warning(f"[Translate] Gemini exception: {e}")
+        return {term: term for term in terms_chunk}
 
 
 def _translate_terms(terms, lang_name, domain_note, cache_key, cache_dict, lang_code=""):
@@ -3804,7 +4167,13 @@ def get_seasonal_alerts():
         "city": city,
         "alerts": alerts,
     })
-
+    
+@app.route('/service-worker.js')
+def service_worker():
+    response = send_from_directory('static', 'service-worker.js')
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Content-Type'] = 'application/javascript'
+    return response
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7860, debug=DEBUG_MODE)
