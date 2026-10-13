@@ -1,7 +1,11 @@
 /* ── State ──────────────────────────────────── */
 let allMarketData = {};
+let allCityMeta = {};   // {city: {data_status, last_updated}}
 let currentSearchedMarkets = null;
 let allLocations = [];
+let allLiveCities = [];
+let allHistoryCities = [];
+let allNoDataCities = [];
 let marketChart = null;
 let activeChartType = 'line';
 let activeFilter = 'all';
@@ -28,6 +32,32 @@ function tCrop(name) {
 /** Translate a demand label */
 function tDemand(demand) {
     return _translations[demand] || demand;
+}
+
+/**
+ * Return a human-friendly relative time string.
+ * dateStr  – ISO date string (YYYY-MM-DD or full ISO datetime)
+ * Returns strings like "Just now", "2 hrs ago", "3 days ago", "1 month ago".
+ */
+function _timeAgo(dateStr) {
+    if (!dateStr) return '';
+    try {
+        // Support both YYYY-MM-DD (treat as start of that day) and full ISO
+        const parsed = dateStr.length === 10 ? new Date(dateStr + 'T00:00:00') : new Date(dateStr);
+        if (isNaN(parsed)) return '';
+        const diffMs  = Date.now() - parsed.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+        if (diffMin < 5)   return 'Just now';
+        if (diffMin < 60)  return `${diffMin} min ago`;
+        const diffHr = Math.floor(diffMin / 60);
+        if (diffHr < 24)   return `${diffHr} hr${diffHr > 1 ? 's' : ''} ago`;
+        const diffDay = Math.floor(diffHr / 24);
+        if (diffDay < 30)  return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
+        const diffMon = Math.floor(diffDay / 30);
+        return `${diffMon} month${diffMon > 1 ? 's' : ''} ago`;
+    } catch(e) {
+        return '';
+    }
 }
 
 /* ══════════════════════════════════════════════
@@ -201,18 +231,21 @@ async function loadAllMarkets() {
         const res = await fetch('/api/market');
         const data = await res.json();
 
-        allMarketData = data.markets || {};
-        allLocations = data.locations || Object.keys(allMarketData);
-        const emptyCities = data.empty_cities || [];
+        allMarketData    = data.markets   || {};
+        allCityMeta      = data.city_meta || {};
+        allLocations     = data.locations || Object.keys(allMarketData);
+        allLiveCities    = data.live_cities    || [];
+        allHistoryCities = data.history_cities || [];
+        allNoDataCities  = data.no_data_cities || data.empty_cities || [];
 
         if (!res.ok || data.error) {
             throw new Error(data.error || `HTTP ${res.status}`);
         }
 
         const liveCount = data.live_count || 0;
-        console.log(`[Market] Live commodities: ${liveCount} | Cities with no live data: ${emptyCities.length}`);
+        console.log(`[Market] Live commodities: ${liveCount} | History cities: ${allHistoryCities.length} | No-data cities: ${allNoDataCities.length}`);
 
-        updateDataSourceBadge(liveCount, emptyCities);
+        updateDataSourceBadge(liveCount, allLiveCities, allHistoryCities, allNoDataCities);
 
         hideLoading();
         populateCityDropdown();
@@ -222,6 +255,10 @@ async function loadAllMarkets() {
         currentChartCity = firstCity;
         const sel = document.getElementById('chartCitySelect');
         if (sel) sel.value = firstCity;
+
+        // Expose a compact market summary globally so the chatbot can
+        // answer questions about the prices currently visible on screen.
+        _exposeMarketDataForChat(firstCity);
 
         // Apply saved language BEFORE first render so data shows translated right away
         const savedLang = localStorage.getItem('agrosmart_lang') || 'en';
@@ -241,6 +278,28 @@ async function loadAllMarkets() {
         console.warn('[Market] Live fetch failed:', err);
         showMarketLoadError();
     }
+}
+
+/* Expose compact market data for the chatbot so it can answer price questions */
+function _exposeMarketDataForChat(city) {
+    if (!city || !allMarketData) return;
+    const commodities = (allMarketData[city] || []).slice(0, 15).map(item => ({
+        crop:  item.crop  || item.commodity || item.name || '?',
+        price: item.modal_price || item.price || item.min_price || '?',
+        market: item.market || '',
+        district: item.district || '',
+        change: item.change || 0
+    }));
+    const marketObj = {
+        city,
+        commodities,
+        allMarkets: allMarketData,
+        locations: allLocations
+    };
+    window.lastMarketData = marketObj;
+    try {
+        sessionStorage.setItem('smartagro_market_data', JSON.stringify(marketObj));
+    } catch(e) {}
 }
 
 function showMarketLoadError() {
@@ -274,14 +333,21 @@ function showMarketLoadError() {
     }
 }
 
-function updateDataSourceBadge(liveCount, emptyCities) {
+function updateDataSourceBadge(liveCount, liveCities, historyCities, noDataCities) {
     const badge = document.getElementById('dataSourceBadge');
     if (!badge) return;
-    const emptyCount = (emptyCities || []).length;
+    const liveLen    = (liveCities    || []).length;
+    const histLen    = (historyCities || []).length;
+    const noLen      = (noDataCities  || []).length;
     if (liveCount > 0) {
-        const suffix = emptyCount > 0 ? ` · no live data for ${emptyCount} location(s)` : '';
+        let suffix = '';
+        if (histLen > 0) suffix += ` · ${histLen} city(ies) from cache`;
+        if (noLen  > 0) suffix += ` · ${noLen} city(ies) unavailable`;
         badge.innerHTML = `<i class="fas fa-circle" style="color:#4ade80;font-size:0.5rem"></i> ${liveCount} live prices (Agmarknet)${suffix}`;
         badge.style.color = '#4ade80';
+    } else if (histLen > 0) {
+        badge.innerHTML = `<i class="fas fa-circle" style="color:#fbbf24;font-size:0.5rem"></i> Showing cached data for ${histLen} city(ies) — no live feed right now`;
+        badge.style.color = '#fbbf24';
     } else {
         badge.innerHTML = `<i class="fas fa-circle" style="color:#f87171;font-size:0.5rem"></i> No live market data available right now`;
         badge.style.color = '#f87171';
@@ -323,54 +389,76 @@ function renderMarketGrid(markets) {
     if (none) none.style.display = 'none';
     grid.style.display = '';
 
-    const cropLabel = _t('Crop') || 'Crop';
-    const priceLabel = _t('Price') || 'Price';
+    const cropLabel   = _t('Crop')   || 'Crop';
+    const priceLabel  = _t('Price')  || 'Price';
     const changeLabel = _t('Change') || 'Change';
     const demandLabel = _t('Demand') || 'Demand';
-    const cropsLabel = _t('crops') || 'crops';
+    const cropsLabel  = _t('crops')  || 'crops';
 
     let hasVisible = false;
 
     grid.innerHTML = entries.map(([city, crops], cityIdx) => {
-                if (crops.length === 0) {
-                    // No live Agmarknet data for this city's state right now —
-                    // say so plainly rather than hiding the city or inventing prices.
-                    hasVisible = true;
-                    return `
+        const meta       = allCityMeta[city] || {};
+        const dataStatus = meta.data_status  || 'no_data';
+        const lastUpd    = meta.last_updated || '';
+        const timeAgoStr = _timeAgo(lastUpd);
+
+        // Build the status badge HTML
+        let statusBadge = '';
+        if (dataStatus === 'live') {
+            statusBadge = `<span class="city-status-badge badge-live"><i class="fas fa-circle" style="font-size:0.45rem"></i> LIVE</span>`;
+        } else if (dataStatus === 'history') {
+            statusBadge = `<span class="city-status-badge badge-cached"><i class="fas fa-clock" style="font-size:0.6rem"></i> CACHED</span>`;
+        } else {
+            statusBadge = `<span class="city-status-badge badge-no-data"><i class="fas fa-ban" style="font-size:0.6rem"></i> N/A</span>`;
+        }
+
+        // Updated-time label
+        const updatedLabel = timeAgoStr
+            ? `<span class="city-updated-time">${dataStatus === 'live' ? '<i class="fas fa-satellite-dish" style="font-size:0.55rem"></i>' : '<i class="fas fa-history" style="font-size:0.55rem"></i>'} Updated ${timeAgoStr}</span>`
+            : '';
+
+        if (crops.length === 0) {
+            // No data at all for this city
+            hasVisible = true;
+            return `
         <div class="city-card" style="animation-delay:${cityIdx * 0.05}s">
             <div class="city-card-header">
                 <div class="city-name">
                     <i class="fas fa-location-dot"></i> ${city}
+                    ${statusBadge}
                 </div>
-                <span class="city-count">0 crops</span>
+                <div class="city-header-right">
+                    <span class="city-count">0 crops</span>
+                </div>
             </div>
             <div style="padding:24px 8px;text-align:center;color:var(--text-2);font-size:0.85rem">
                 <i class="fas fa-circle-exclamation" style="color:#fbbf24"></i>
-                No live market data available for this location right now.
+                No market data available for this location right now.
             </div>
         </div>`;
-                }
+        }
 
-                let filtered = crops;
-                if (activeFilter === 'Very High') {
-                    filtered = crops.filter(c => c.demand === 'Very High');
-                } else if (activeFilter === 'rising') {
-                    filtered = crops.filter(c => c.change > 0);
-                } else if (activeFilter === 'falling') {
-                    filtered = crops.filter(c => c.change < 0);
-                }
-                if (filtered.length === 0) return '';
-                hasVisible = true;
+        let filtered = crops;
+        if (activeFilter === 'Very High') {
+            filtered = crops.filter(c => c.demand === 'Very High');
+        } else if (activeFilter === 'rising') {
+            filtered = crops.filter(c => c.change > 0);
+        } else if (activeFilter === 'falling') {
+            filtered = crops.filter(c => c.change < 0);
+        }
+        if (filtered.length === 0) return '';
+        hasVisible = true;
 
-                const renderRow = (crop) => {
-                    const isUp   = crop.change >= 0;
-                    const pctAbs = Math.abs(crop.change).toFixed(1);
-                    return `
+        const renderRow = (crop) => {
+            const isUp   = crop.change >= 0;
+            const pctAbs = Math.abs(crop.change).toFixed(1);
+            return `
                     <div class="crop-row">
                         <div class="cr-name" data-crop-key="${crop.crop_key || crop.crop}" title="${tCrop(crop.crop)}">${tCrop(crop.crop)}</div>
                         <div class="cr-price-wrap">
-                            <div class="cr-price">₹${crop.price.toLocaleString('en-IN')}</div>
-                            <div class="cr-unit" data-translate-market="quintal">${_t('quintal') || crop.unit}</div>
+                            <div class="cr-price">${formatMarketPrice(crop.price)}</div>
+                            <div class="cr-unit" data-translate-market="quintal">${getWeightUnitLabel()}</div>
                         </div>
                         <div class="cr-change ${isUp ? 'up' : 'down'}">
                             <i class="fas fa-arrow-${isUp ? 'up' : 'down'}"></i>
@@ -380,21 +468,23 @@ function renderMarketGrid(markets) {
                             ${tDemand(crop.demand)}
                         </div>
                     </div>`;
-                };
+        };
 
-                // Every crop renders immediately (no "show more" click needed);
-                // the card itself stays a fixed height and .crop-rows-wrapper
-                // scrolls internally when a city has more crops than fit. Keeps
-                // the whole grid visually even regardless of how many crops any
-                // one city has, and everything is one scroll away instead of
-                // hidden behind a toggle.
-                return `
+        // Every crop renders immediately (no "show more" click needed);
+        // the card itself stays a fixed height and .crop-rows-wrapper
+        // scrolls internally when a city has more crops than fit. Keeps
+        // the whole grid visually even regardless of how many crops any
+        // one city has, and everything is one scroll away instead of
+        // hidden behind a toggle.
+        return `
         <div class="city-card" style="animation-delay:${cityIdx * 0.05}s">
             <div class="city-card-header" onclick="toggleCityCard(this)">
                 <div class="city-name">
                     <i class="fas fa-location-dot"></i> ${city}
+                    ${statusBadge}
                 </div>
                 <div class="city-header-right">
+                    ${updatedLabel}
                     <span class="city-count">${filtered.length} ${cropsLabel}</span>
                     <i class="fas fa-chevron-down city-chevron"></i>
                 </div>
@@ -446,6 +536,23 @@ function getDemandClass(demand) {
         'Low':       'low',
     };
     return map[demand] || 'medium';
+}
+
+/* ── Market weight unit helpers ──────────────────── */
+function getWeightUnit() {
+    return (window.SmartAgroSettings && window.SmartAgroSettings.get('weightUnit')) || 'quintal';
+}
+function formatMarketPrice(quintalPrice) {
+    if (quintalPrice == null || isNaN(quintalPrice)) return '—';
+    var unit = getWeightUnit();
+    if (unit === 'kg') {
+        var kgPrice = (quintalPrice / 100);
+        return '\u20b9' + kgPrice.toFixed(2);
+    }
+    return '\u20b9' + Math.round(quintalPrice).toLocaleString('en-IN');
+}
+function getWeightUnitLabel() {
+    return getWeightUnit() === 'kg' ? 'kg' : 'quintal';
 }
 
 /* ══════════════════════════════════════════════
@@ -603,7 +710,7 @@ function buildTicker(markets) {
                     `<span style="margin:0 20px;display:inline-flex;align-items:center;gap:6px">
                         <strong style="color:#e8f5e9">${tCrop(crop.crop)}</strong>
                         <span style="color:var(--text-3)">(${city})</span>
-                        <strong style="color:var(--amber)"> ₹${crop.price.toLocaleString('en-IN')}</strong>
+                        <strong style="color:var(--amber)"> ${formatMarketPrice(crop.price)}/${getWeightUnitLabel()}</strong>
                         <span style="color:${color};font-size:0.7rem"> ${sign}${Math.abs(crop.change).toFixed(1)}%</span>
                         <span class="cr-demand demand-${getDemandClass(crop.demand)}" style="font-size:0.65rem;padding:1px 6px;border-radius:50px">${tDemand(crop.demand)}</span>
                     </span>`
@@ -632,7 +739,10 @@ function switchChart(type) {
 
 function updateChart() {
     const sel = document.getElementById('chartCitySelect');
-    if (sel) currentChartCity = sel.value;
+    if (sel) {
+        currentChartCity = sel.value;
+        _exposeMarketDataForChat(currentChartCity);
+    }
     buildChart(allMarketData, currentChartCity, activeChartType);
 }
 
@@ -1009,9 +1119,10 @@ function buildPriceTable(markets) {
             return `
             <td>
                 <div style="color:${color};font-weight:700">
-                    ₹${item.price.toLocaleString('en-IN')}
+                    ${formatMarketPrice(item.price)}
                     <span style="font-size:0.62rem;opacity:0.7"> ${arrow}</span>
                 </div>
+                <div style="font-size:0.62rem;color:var(--text-3);margin-top:1px">${getWeightUnitLabel()}</div>
                 <div class="cr-demand demand-${dClass}" style="display:inline-flex;font-size:0.58rem;padding:1px 5px;margin-top:2px">
                     ${tDemand(item.demand)}
                 </div>
