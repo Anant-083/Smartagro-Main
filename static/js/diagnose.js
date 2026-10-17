@@ -21,8 +21,10 @@ function tr(english) {
     if (!english) return '';
     const lang = getLang();
     if (lang === 'en') return english;
-    const map = window.diagnoseTx || {};
-    return map[english.trim()] || english;
+    const trimmed = english.trim();
+    if (window.diagnoseTx && window.diagnoseTx[trimmed]) return window.diagnoseTx[trimmed];
+    if (typeof tStatic === 'function') return tStatic(trimmed);
+    return english;
 }
 
 /* ══════════════════════════════════════════════
@@ -152,6 +154,12 @@ async function loadDiagnoseTranslations(lang) {
         return;
     }
 
+    // ── Instant static translation from pre-baked T object ──
+    if (typeof T !== 'undefined' && T[lang]) {
+        window.diagnoseTx = { ...T[lang] };
+        applyDiagnoseStaticTranslations();
+    }
+
     const isGlobal = document.getElementById('txTimerOverlay')?.classList.contains('visible');
     if (!isGlobal) showDiagnoseTranslateOverlay(lang);
 
@@ -163,7 +171,8 @@ async function loadDiagnoseTranslations(lang) {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        window.diagnoseTx = data.translations || {};
+        const staticTx = (typeof T !== 'undefined' && T[lang]) ? T[lang] : {};
+        window.diagnoseTx = { ...staticTx, ...(data.translations || {}) };
     } catch (err) {
         console.warn('[DiagnoseTranslate] fetch failed:', err);
         window.diagnoseTx = {};
@@ -892,10 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
     _loadDiagnoseHistory();
     renderDiagnoseHistoryPanel();
 });
-document.addEventListener('langChanged', (e) => {
-    const lang = (e.detail && e.detail.lang) || getLang();
-    loadDiagnoseTranslations(lang);
-});
+
 /* ===========================================================
    DIAGNOSE HISTORY — session-only, stored in sessionStorage
    =========================================================== */

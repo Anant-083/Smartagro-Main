@@ -10,9 +10,11 @@ function smoothJump(anchorId) {
 }
 
 function dt(key) {
-    return window._dashTrans[key] || key;
+    if (!key) return '';
+    if (window._dashTrans && window._dashTrans[key]) return window._dashTrans[key];
+    if (typeof tStatic === 'function') return tStatic(key);
+    return key;
 }
-
 /* ── Native names shown in the "Translating to…" overlay ───── */
 const DASH_LANG_DISPLAY_NAMES = {
     hi: 'हिन्दी',
@@ -127,7 +129,13 @@ function hideDashTranslateOverlay() {
 }
 
 async function applyDashboardLanguage(langCode) {
-    if (window._dashTranslateInProgress) return;
+    // If a backend call is in-flight for a DIFFERENT lang, abort it and restart
+    if (window._dashTranslateInProgress) {
+        if (window._dashTranslateController) {
+            window._dashTranslateController.abort();
+        }
+        window._dashTranslateInProgress = false;
+    }
     window._dashTranslateController = null;
 
     if (langCode === 'en') {
@@ -146,13 +154,20 @@ async function applyDashboardLanguage(langCode) {
         return;
     }
 
+    // ── Instant static translation from pre-baked T object ──
+    if (langCode !== 'en' && typeof T !== 'undefined' && T[langCode]) {
+        window._dashTrans = { ...T[langCode] };
+        window._dashTransLang = langCode;
+        retranslateStaticUI();
+    }
+
     window._dashTranslateInProgress = true;
     const isGlobal = document.getElementById('txTimerOverlay')?.classList.contains('visible');
     if (!isGlobal) showDashTranslateOverlay(langCode);
 
-   const controller = new AbortController();
+    const controller = new AbortController();
     window._dashTranslateController = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 60000); 
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
         const res = await fetch('/api/translate-dashboard', {
@@ -162,16 +177,18 @@ async function applyDashboardLanguage(langCode) {
             signal: controller.signal,
         });
         const data = await res.json();
-       if (data && data.translations && Object.keys(data.translations).length) {
-            window._dashTrans = data.translations;
+        if (data && data.translations && Object.keys(data.translations).length) {
+            // Merge: static T strings + dynamic backend translations (crop names, season)
+            const staticTx = (typeof T !== 'undefined' && T[langCode]) ? T[langCode] : {};
+            window._dashTrans = { ...staticTx, ...data.translations };
             window._dashTransLang = langCode;
-        } else {
-            window._dashTrans = {};
-            window._dashTransLang = null;
         }
-        } catch (err) {
-        console.warn('[DashTranslate] error:', err);
-        window._dashTrans = {};
+        // else: keep the T static strings that were pre-seeded above
+    } catch (err) {
+        if (err.name !== 'AbortError') {
+            console.warn('[DashTranslate] error:', err);
+        }
+        // Preserve T static strings already applied — do NOT wipe to {}
     } finally {
         clearTimeout(timeoutId);
         retranslateStaticUI();
@@ -310,6 +327,11 @@ async function loadWeatherAndCrops(lat, lon) {
         if (cached) {
             translationsPromise = cached;
         } else {
+            // Apply static translations instantly from pre-baked T object
+            if (typeof T !== 'undefined' && T[lang]) {
+                window._dashTrans = { ...(window._dashTrans || {}), ...T[lang] };
+                window._dashTransLang = lang;
+            }
             showDashTranslateOverlay(lang); // extends the loading buffer
             translationsPromise = fetch('/api/translate-dashboard', {
                 method: 'POST',
@@ -325,7 +347,8 @@ async function loadWeatherAndCrops(lat, lon) {
 
 // Apply translations before first render so every dt() call is resolved
 if (txData && txData.translations && Object.keys(txData.translations).length) {
-        window._dashTrans = txData.translations;
+        const staticTx = (typeof T !== 'undefined' && T[lang]) ? T[lang] : {};
+        window._dashTrans = { ...staticTx, ...txData.translations };
         window._dashTransLang = txData.lang || lang;
     }
     hideDashTranslateOverlay();

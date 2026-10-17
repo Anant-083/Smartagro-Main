@@ -21,7 +21,9 @@ function setTranslations(data) {
 
 function _t(key) {
     if (!key) return '';
-    return _translations[key] || key;
+    if (_translations && _translations[key]) return _translations[key];
+    if (typeof tStatic === 'function') return tStatic(key);
+    return key;
 }
 
 /** Translate a crop name */
@@ -179,6 +181,20 @@ async function loadTranslations(lang) {
         reRenderMarket();
         return;
     }
+
+    // ── Instant static translation from pre-baked T object ──
+    if (typeof T !== 'undefined' && T[lang]) {
+        setTranslations({ ...T[lang] });
+        reRenderMarket();
+        // If we have a backend cache too, merge and re-render
+        if (_translationCache[lang]) {
+            setTranslations({ ...T[lang], ..._translationCache[lang] });
+            reRenderMarket();
+            _translationInProgress = false;
+            return;
+        }
+    }
+
     if (_translationInProgress) return;
     _translationInProgress = true;
 
@@ -200,8 +216,9 @@ async function loadTranslations(lang) {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const tx = data.translations || {};
-        _translationCache[lang] = tx; // cache for instant future switches
+        const staticTx = (typeof T !== 'undefined' && T[lang]) ? T[lang] : {};
+        const tx = { ...staticTx, ...(data.translations || {}) };
+        _translationCache[lang] = tx;
         setTranslations(tx);
         console.log(`[Market] Translations loaded for ${data.lang_name || lang}: ${Object.keys(_translations).length} terms`);
     } catch (err) {

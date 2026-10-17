@@ -1,27 +1,17 @@
 const LANGUAGES = [
     { code: 'en', name: 'English', flag: '🇬🇧', label: 'EN' },
     { code: 'hi', name: 'हिन्दी (Hindi)', flag: '🇮🇳', label: 'HI' },
-    { code: 'bn', name: 'বাংলা (Bengali)', flag: '🇮🇳', label: 'BN' },
-    { code: 'te', name: 'తెలుగు (Telugu)', flag: '🇮🇳', label: 'TE' },
+    { code: 'pa', name: 'ਪੰਜਾਬੀ (Punjabi)', flag: '🇮🇳', label: 'PA' },
     { code: 'mr', name: 'मराठी (Marathi)', flag: '🇮🇳', label: 'MR' },
+    { code: 'te', name: 'తెలుగు (Telugu)', flag: '🇮🇳', label: 'TE' },
     { code: 'ta', name: 'தமிழ் (Tamil)', flag: '🇮🇳', label: 'TA' },
+    { code: 'bn', name: 'বাংলা (Bengali)', flag: '🇮🇳', label: 'BN' },
     { code: 'gu', name: 'ગુજરાતી (Gujarati)', flag: '🇮🇳', label: 'GU' },
     { code: 'kn', name: 'ಕನ್ನಡ (Kannada)', flag: '🇮🇳', label: 'KN' },
     { code: 'ml', name: 'മലയാളം (Malayalam)', flag: '🇮🇳', label: 'ML' },
-    { code: 'pa', name: 'ਪੰਜਾਬੀ (Punjabi)', flag: '🇮🇳', label: 'PA' },
     { code: 'or', name: 'ଓଡ଼ିଆ (Odia)', flag: '🇮🇳', label: 'OR' },
     { code: 'as', name: 'অসমীয়া (Assamese)', flag: '🇮🇳', label: 'AS' },
     { code: 'ur', name: 'اردو (Urdu)', flag: '🇮🇳', label: 'UR' },
-    { code: 'mai', name: 'मैथिली (Maithili)', flag: '🇮🇳', label: 'MAI' },
-    { code: 'sat', name: 'संताली (Santali)', flag: '🇮🇳', label: 'SAT' },
-    { code: 'ks', name: 'کٲشُر (Kashmiri)', flag: '🇮🇳', label: 'KS' },
-    { code: 'ne', name: 'नेपाली (Nepali)', flag: '🇮🇳', label: 'NE' },
-    { code: 'sd', name: 'سنڌي (Sindhi)', flag: '🇮🇳', label: 'SD' },
-    { code: 'kok', name: 'कोंकणी (Konkani)', flag: '🇮🇳', label: 'KOK' },
-    { code: 'mni', name: 'মণিপুরী (Manipuri)', flag: '🇮🇳', label: 'MNI' },
-    { code: 'bodo', name: 'बोडो (Bodo)', flag: '🇮🇳', label: 'BDO' },
-    { code: 'doi', name: 'डोगरी (Dogri)', flag: '🇮🇳', label: 'DOI' },
-    { code: 'sa', name: 'संस्कृत (Sanskrit)', flag: '🇮🇳', label: 'SA' },
 ];
 
 /* ════════════════════════════════════════════════
@@ -2221,116 +2211,6 @@ const T = {
         safe_title: 'हुण उगाने आस्तै सुरक्षित',
         risk_chart_title: 'खतरे दा पधर',
     },
-    sa: {
-        hero_badge: '🌿 AI-चालित परिशुद्ध कृषि',
-        hero_subtitle: 'AI-चालितेन रियल-टाइम कृषिपरामर्शः, रोगनिर्णयश्च बाजारसूचना',
-        section_crops_sub: 'भवतः जलवायुम् आधृत्य',
-        section_advisory: 'कृषि परामर्श पञ्जिका',
-        section_advisory_sub: 'भवतः कृषेः साप्ताहिकी योजना',
-        section_pest: 'कीटनाशकं कीटनियंत्रणञ्च',
-        section_pest_sub: 'सुरक्षितं कृषिसंरक्षणम्',
-        section_quick: 'त्वरितक्रियाः',
-        quick_diagnose: 'कृषिरोगनिर्णयः',
-        quick_diagnose_sub: 'स्वकृषेः चित्रमुपनयतु',
-        quick_market: 'बाजारमूल्यं पश्यतु',
-        quick_market_sub: 'भारते सजीवमण्डीमूल्यानि',
-        quick_alerts: 'सक्रियसूचनाः पश्यतु',
-        quick_alerts_sub: 'वायुमण्डलं कीटश्च सूचनाः',
-        forecast_title: '6-दिनपूर्वानुमानम्',
-        stat_temp: 'तापमानम्',
-        stat_humidity: 'आर्द्रता',
-        stat_wind: 'वायुः',
-        stat_visibility: 'दृश्यता',
-        stat_pressure: 'दबावः',
-        diagnose_title: 'कृषिरोगसंसूचकः',
-        diagnose_subtitle: 'AI-निदानाय प्रभावितकृषेः चित्रमुपनयतु',
-        upload_title: 'स्वकृषेः छायाचित्रम् अत्र स्थापयतु',
-        upload_sub: 'JPG, PNG, WEBP — अधिकतम 10 MB',
-        results_placeholder: 'निदानाय कृषेः छायाचित्रमुपनयतु',
-        market_subtitle: '10+ भारतीयनगरेषु मण्डीमूल्यानि',
-        alerts_subtitle: 'भवतः क्षेत्रस्य वायुमण्डलसूचनाः कीटपरामर्शश्च',
-        location_required: 'सूचनाभ्यः स्थानमावश्यकम्',
-        location_required_sub: 'संबद्धसूचनां दर्शयितुं स्थानं ददातु',
-        filter_all_alerts: 'सर्वाः सूचनाः',
-        filter_critical: 'गुरुतरम्',
-        filter_warnings: 'सूचनाः',
-        filter_advisories: 'परामर्शाः',
-        filter_weather_tab: 'वायुमण्डलम्',
-        filter_pest_tab: 'कीटः',
-        filter_crop_tab: 'कृषिः',
-        loading_alerts: 'डेटाविश्लेषणम्...',
-        no_alerts_sub: 'भवतः क्षेत्रे कृषेः अनुकूलं वातावरणम्',
-        alert_total: 'सर्वाः सूचनाः',
-        lbl_medium_risk: 'मध्यमजोखिमः',
-        lbl_low_risk: 'न्यूनजोखिमः',
-        lbl_affects: 'प्रभावयति',
-        lbl_target_pest: 'लक्ष्यकीटः',
-        lbl_safe_dose: 'सुरक्षितमात्रा',
-        lbl_max_limit: 'अधिकतमसीमा',
-        lbl_interval: 'अंतरालम्',
-        lbl_pre_harvest: 'कर्षणात् पूर्वम्',
-        lbl_ppe: 'सुरक्षासामग्री',
-        lbl_suitable_for: 'कृते उपयुक्तम्',
-        lbl_humidity: 'आर्द्रता',
-        lbl_no_harmful: 'वर्तमानस्थितौ कोऽपि हानिकरः कृषिर्नास्ति।',
-        lbl_no_safe: 'कोऽपि पूर्णसुरक्षितः कृषिर्नास्ति।',
-        lbl_heat_stress: 'तापतनावः',
-        lbl_humidity_risk: 'आर्द्रताजोखिमः',
-        lbl_wind_damage: 'वायुक्षतिः',
-        lbl_pest_activity: 'कीटक्रियाकलापः',
-        lbl_disease_risk: 'रोगजोखिमः',
-        lbl_overall_risk: 'सर्वजोखिमः',
-        lbl_risk_percent: '% जोखिमः',
-        pesticide_sub: 'अनुशंसितमात्रा',
-        pest_calendar_sub: 'अस्मिन् ऋतौ के कीटाः सक्रियाः',
-        harmful_sub: 'वर्तमानमौसमे एभ्यः कृषिभ्यः विरमतु',
-        safe_sub: 'एते कृषयः वर्तमानमौसमाय उपयुक्ताः',
-        risk_chart_sub: 'वर्तमानकृषिजोखिमकारकाणां दृश्यविवरणम्',
-        loading_market: 'नवीनमण्डीमूल्यानि आनीयन्ते...',
-        market_data_title: 'नगरानुसारं मण्डीमूल्यानि',
-        market_data_sub: 'सर्वे प्रमुखभारतीयमण्ड्यः',
-        tip1: 'सर्वाधिकप्रभावितस्थाने ध्यानं ददातु',
-        tip2: 'प्राकृतिकप्रकाशं उपयुञ्जतु',
-        tip3: 'स्वस्थं प्रभावितञ्च उभयम् अन्तर्भजतु',
-        tip4: 'चित्रग्राहकं स्थिरं धारयतु (30–50 सेमी)',
-        tips_header: 'श्रेष्ठपरिणामार्थं चित्रटिप्पण्यः',
-        btn_check_upcoming: 'Check Upcoming Risks (6-Day Forecast)',
-        crop_risk_title: 'Crop Risk Forecast',
-        crop_risk_sub: 'How your recommended crops hold up against the next 6 days',
-        nav_dashboard: 'सूचनापटलम्',
-        nav_diagnose: 'सस्यरोगनिर्णयः',
-        nav_market: 'बाजारमूल्यानि',
-        nav_alerts: 'सूचनाः',
-        hero_title: 'स्मार्ट कृषिबुद्धिमत्ता',
-        btn_location: 'मम स्थानं प्राप्नोतु',
-        btn_diagnose: 'सस्यं परीक्षयतु',
-        section_crops: 'ऋत्वनुगुणं सस्यपरामर्शः',
-        section_weather: 'वर्तमानवायुमण्डलम्',
-        alerts_title: 'कृषिसूचनाकेन्द्रम्',
-        live_alerts: 'प्रत्यक्षसूचनाः',
-        alert_danger: 'गुरुतरम्',
-        alert_warning: 'सूचना',
-        alert_info: 'परामर्शः',
-        btn_get_location: 'स्थानं सक्षमं कुरु',
-        btn_upload: 'छायाचित्रमुपनयतु',
-        btn_camera: 'छायाचित्रं गृह्णातु',
-        btn_analyze: 'सस्यविश्लेषणम्',
-        market_title: 'सस्यबाजारमूल्यानि',
-        btn_search: 'अन्विष्यतु',
-        filter_all: 'सर्वम्',
-        no_alerts_title: 'सर्वं शुभम्! न काचित् सूचना',
-        footer_text: 'AI-कृषिना कृषकान् सशक्तान् कुर्मः',
-        lbl_active_now: '⚠ इदानीं सक्रियम्',
-        lbl_high_risk: 'उच्चजोखिमः',
-        lbl_risky: '⚠ जोखिमपूर्णम्',
-        lbl_safe: '✓ सुरक्षितम्',
-        lbl_action: 'कार्यम्',
-        pest_calendar_title: 'ऋतुकीटसूचनापञ्जिका',
-        pesticide_title: 'कीटनाशकसुरक्षागाइडः',
-        harmful_title: 'वर्तमानस्थितौ जोखिमे सस्यानि',
-        safe_title: 'अधुना कर्षणाय सुरक्षितम्',
-        risk_chart_title: 'जोखिमस्तरपर्यालोचनम्',
-    },
 };
 
 /* ════════════════════════════════════════════
@@ -2353,13 +2233,26 @@ function applyTranslations() {
         const text = translate(key);
         if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
             el.placeholder = text;
-        } else if (el.children.length > 0 && !el.classList.contains('nav-item')) {
-            el.childNodes.forEach(node => {
-                if (node.nodeType === 3 && node.textContent.trim()) {
-                    node.textContent = text;
-                }
-            });
-        } else {
+            return;
+        }
+
+        // If the element has a span with text (e.g. in nav items or buttons), update that span
+        const targetSpan = el.querySelector('span:not([class*="badge"])') || el.querySelector('.gradient-text');
+        if (targetSpan) {
+            targetSpan.textContent = text;
+            return;
+        }
+
+        // If element has icon children (like <i class="..."></i>), update only the text node without destroying the icon
+        let updatedTextNode = false;
+        el.childNodes.forEach(node => {
+            if (node.nodeType === 3 && node.textContent.trim()) {
+                node.textContent = ' ' + text;
+                updatedTextNode = true;
+            }
+        });
+
+        if (!updatedTextNode && el.children.length === 0) {
             el.textContent = text;
         }
     });
@@ -2386,6 +2279,12 @@ function setLanguage(code) {
     if (typeof reRenderDynamic === 'function') reRenderDynamic();
     if (typeof applyDashboardLanguage === 'function') applyDashboardLanguage(code);
 }
+
+// Global instant translation helper — reads from pre-baked T object, zero network call
+window.tStatic = function(key, lang) {
+    const l = lang || window.currentLang || 'en';
+    return (T[l] && T[l][key]) || (T['en'] && T['en'][key]) || key;
+};
 
 function updateLangUI() {
     const lang = LANGUAGES.find(l => l.code === currentLang) || LANGUAGES[0];
@@ -2568,10 +2467,10 @@ window.changeAppLanguage = function(code) {
     showTranslationTimerOverlay(langObj, function(finishOverlay) {
         setLanguage(code);
 
-        const promises = [];
-        if (typeof loadDashboardTranslations === 'function') promises.push(loadDashboardTranslations(code));
+                const promises = [];
+        if (typeof applyDashboardLanguage === 'function') promises.push(applyDashboardLanguage(code));
         if (typeof loadDiagnoseTranslations === 'function') promises.push(loadDiagnoseTranslations(code));
-        if (typeof loadMarketTranslations === 'function') promises.push(loadMarketTranslations(code));
+        if (typeof loadTranslations === 'function') promises.push(loadTranslations(code));
         if (typeof loadAlertsTranslations === 'function') promises.push(loadAlertsTranslations(code));
 
         if (window.currentDiagnosisResult && typeof window.translateCurrentDiagnosisResult === 'function') {

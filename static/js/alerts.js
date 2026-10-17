@@ -26,8 +26,11 @@ let _alertsTxInProgress = false;
 
 function _at(key) {
     if (!key) return '';
-    return _alertsTx[key] || key;
+    if (_alertsTx && _alertsTx[key]) return _alertsTx[key];
+    if (typeof tStatic === 'function') return tStatic(key);
+    return key;
 }
+
 
 /* ── Language display names ─────────────────── */
 const ALERTS_LANG_NAMES = {
@@ -119,6 +122,18 @@ async function loadAlertsTranslations(lang) {
         return;
     }
 
+    // ── Instant static translation from pre-baked T object ──
+    if (typeof T !== 'undefined' && T[lang]) {
+        _alertsTx = { ...T[lang] };
+        reRenderAlerts();
+        // If we also have a cache from a previous backend call, merge it in
+        if (_alertsTxCache[lang]) {
+            _alertsTx = { ...T[lang], ..._alertsTxCache[lang] };
+            reRenderAlerts();
+            return;
+        }
+    }
+
     if (_alertsTxCache[lang]) {
         _alertsTx = _alertsTxCache[lang];
         reRenderAlerts();
@@ -151,7 +166,9 @@ async function loadAlertsTranslations(lang) {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        _alertsTx = data.translations || {};
+        // Merge: static T strings + dynamic backend translations
+        const staticTx = (typeof T !== 'undefined' && T[lang]) ? T[lang] : {};
+        _alertsTx = { ...staticTx, ...(data.translations || {}) };
         _alertsTxCache[lang] = _alertsTx;
     } catch (e) {
         console.warn('[Alerts] Translation failed:', e);
