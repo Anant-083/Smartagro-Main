@@ -428,37 +428,93 @@ function resetResultsPanel() {
 /* ══════════════════════════════════════════════
    CAMERA
 ══════════════════════════════════════════════ */
+function _openNativeCameraPicker() {
+    let camInput = document.getElementById('cameraFileInput');
+    if (!camInput) {
+        camInput = document.createElement('input');
+        camInput.id = 'cameraFileInput';
+        camInput.type = 'file';
+        camInput.accept = 'image/*';
+        camInput.setAttribute('capture', 'environment');
+        camInput.style.display = 'none';
+        camInput.onchange = (e) => handleFileSelect(e);
+        document.body.appendChild(camInput);
+    }
+    camInput.value = '';
+    camInput.click();
+}
+
 async function openCamera() {
     const modal = document.getElementById('cameraModal');
     const video = document.getElementById('cameraFeed');
     const uploadZone = document.getElementById('uploadZone');
 
+    if (!modal || !video) {
+        console.error('[Camera] #cameraModal or #cameraFeed missing from the page');
+        showToast('Camera view is missing from the page.', 'error');
+        return;
+    }
+
+    // Stop any stream that is already running
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+
     try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error('getUserMedia is not available on this browser/context');
+            const e = new Error('Camera needs localhost or HTTPS');
+            e.name = 'InsecureContext';
+            throw e;
         }
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
+
+        // Try the nicer settings first, then fall back to any camera
+        try {
+            cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+        } catch (firstErr) {
+            if (firstErr.name === 'NotAllowedError' || firstErr.name === 'SecurityError') throw firstErr;
+            console.warn('[Camera] preferred settings failed, retrying with video:true', firstErr);
+            cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+
+        video.setAttribute('playsinline', '');
+        video.muted = true;
+        video.autoplay = true;
         video.srcObject = cameraStream;
+
         if (uploadZone) uploadZone.style.display = 'none';
-        if (modal) modal.style.display = '';
+        // If a stylesheet hides the modal, inline '' is not enough, so force it visible
+        modal.style.display = '';
+        if (getComputedStyle(modal).display === 'none') modal.style.display = 'block';
+
+        try { await video.play(); } catch (playErr) { console.warn('[Camera] video.play() blocked:', playErr); }
+
         showToast(tr('Camera ready — position your crop in frame.'), 'success');
     } catch (err) {
-        console.warn('Camera stream unavailable, opening native camera picker:', err);
-        let camInput = document.getElementById('cameraFileInput');
-        if (!camInput) {
-            camInput = document.createElement('input');
-            camInput.id = 'cameraFileInput';
-            camInput.type = 'file';
-            camInput.accept = 'image/*';
-            camInput.setAttribute('capture', 'environment');
-            camInput.style.display = 'none';
-            camInput.onchange = (e) => handleFileSelect(e);
-            document.body.appendChild(camInput);
+        console.error('[Camera] failed:', err.name, err.message, err);
+
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(t => t.stop());
+            cameraStream = null;
         }
-        camInput.value = '';
-        camInput.click();
+        if (uploadZone && !currentImageBase64) uploadZone.style.display = '';
+
+        const reasons = {
+            NotAllowedError:  'Camera blocked. Allow camera for this site in the address bar, and check Windows camera privacy settings.',
+            SecurityError:    'Camera blocked by browser security. Open the app on localhost or HTTPS.',
+            NotFoundError:    'No camera found on this device.',
+            NotReadableError: 'Camera is being used by another app. Close it and try again.',
+            InsecureContext:  'Camera needs localhost or HTTPS. Do not open the app by IP address.',
+        };
+        showToast(reasons[err.name] || ('Camera error: ' + (err.name || err.message)), 'error');
+
+        // Permission and busy-camera errors: do not open a file picker, it only confuses.
+        // Other errors (no camera, insecure page on a phone): fall back to the native picker.
+        if (err.name !== 'NotAllowedError' && err.name !== 'NotReadableError' && err.name !== 'SecurityError') {
+            _openNativeCameraPicker();
+        }
     }
 }
 
@@ -481,12 +537,20 @@ function closeCamera() {
 
 function capturePhoto() {
     const video = document.getElementById('cameraFeed');
+    if (!video || !video.videoWidth) {
+        showToast('Camera is not ready yet. Wait a second and try again.', 'warning');
+        return;
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
 
     canvas.toBlob(blob => {
+        if (!blob) {
+            showToast('Could not capture the photo. Try again.', 'error');
+            return;
+        }
         const file = new File([blob], 'capture.jpg', { type: 'image/jpeg' });
         closeCamera();
         processImageFile(file);

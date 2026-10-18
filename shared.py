@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import json
@@ -6,6 +7,7 @@ import uuid
 import socket
 import logging
 import threading
+import concurrent.futures
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
@@ -17,7 +19,7 @@ try:
         return socket.AF_INET
     if sys.platform == "win32":
         urllib3_conn.allowed_gai_family = _allowed_gai_family
-except Exception as _e:
+except Exception:
     pass
 
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -46,6 +48,8 @@ BUILD_VERSION = str(int(time.time()))
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 VISUALCROSSING_API_KEY = os.getenv("VISUALCROSSING_API_KEY", "")
 GROQ_API_KEY        = os.getenv("GROQ_API_KEY", "")
+# The "or os.getenv('GEMINI_API_KEY')" part is only a safety net while you switch over.
+# Delete it once both new keys work, so a missing key can never silently share the old one.
 GEMINI_DIAGNOSE_KEY  = os.getenv("GEMINI_API_KEY_DIAGNOSE", "") or os.getenv("GEMINI_API_KEY", "")
 GEMINI_TRANSLATE_KEY = os.getenv("GEMINI_API_KEY_TRANSLATE", "") or os.getenv("GEMINI_API_KEY", "")
 GEMINI_TRANSLATE_MODEL = os.getenv("GEMINI_TRANSLATE_MODEL", "gemini-3.5-flash")
@@ -102,9 +106,6 @@ def is_admin_authorized(request):
     token = request.headers.get("X-Admin-Key") or request.args.get("token")
     return token == ADMIN_SECRET_KEY
 
-import re
-import concurrent.futures
-
 # ── Groq API Retry Helper ───────────────────────────────────────────────────
 def post_to_groq(body, headers, max_retries=3):
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -124,10 +125,81 @@ def post_to_groq(body, headers, max_retries=3):
             time.sleep(1)
     return None
 
-# ── Multilingual Translation Engine ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# Multilingual Translation Engine
+#
+# Order of work for every fixed-text request:
+#   1. memory cache          (instant, lost on restart)
+#   2. saved file on disk    translations/<lang>.json   (instant, survives restarts,
+#                            commit these files so Render has them too)
+#   3. Gemini (translate key) -> Groq fallback, ONLY for terms not saved yet
+# Only terms the model really answered are saved, so a rate-limit failure can
+# never get stored as "English forever".
+# ═══════════════════════════════════════════════════════════════════════════
 TRANSLATE_CHUNK_SIZE = 60
 TRANSLATE_MAX_WORKERS = 2
 TRANSLATE_STAGGER_SEC = 0.15
+GROQ_TRANSLATE_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+
+TRANSLATIONS_DIR = os.path.join(basedir, "translations")
+os.makedirs(TRANSLATIONS_DIR, exist_ok=True)
+_lang_file_lock = threading.Lock()
+_lang_file_memo = {}
+
+# After a Gemini 429 we stop calling Gemini for translation for a short while
+# and use Groq instead, so a per-minute limit never turns into a wall of errors.
+_gemini_translate_paused_until = 0.0
+_gemini_translate_lock = threading.Lock()
+GEMINI_TRANSLATE_PAUSE_SEC = 90
+
+
+def _lang_file_path(lang_code):
+    safe = re.sub(r"[^a-z]", "", (lang_code or "").lower())
+    return os.path.join(TRANSLATIONS_DIR, f"{safe}.json") if safe else None
+
+
+def _read_lang_file_unlocked(lang_code):
+    path = _lang_file_path(lang_code)
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def load_saved_translations(lang_code):
+    """Return a copy of the saved English -> translation map for a language."""
+    if not lang_code:
+        return {}
+    with _lang_file_lock:
+        if lang_code not in _lang_file_memo:
+            _lang_file_memo[lang_code] = _read_lang_file_unlocked(lang_code)
+        return dict(_lang_file_memo[lang_code])
+
+
+def save_new_translations(lang_code, new_pairs):
+    """Merge new term translations into translations/<lang>.json (atomic write)."""
+    path = _lang_file_path(lang_code)
+    if not path or not new_pairs:
+        return
+    with _lang_file_lock:
+        data = _lang_file_memo.get(lang_code)
+        if data is None:
+            data = _read_lang_file_unlocked(lang_code)
+        data.update(new_pairs)
+        _lang_file_memo[lang_code] = data
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
+            os.replace(tmp, path)
+            logger.info(f"[Translate] saved {len(new_pairs)} new terms to {os.path.basename(path)} (total {len(data)})")
+        except Exception as e:
+            logger.warning(f"[Translate] could not save {path}: {e}")
+
 
 def _extract_json_object(raw_text):
     text = re.sub(r"```(?:json)?", "", raw_text).replace("```", "").strip()
@@ -146,102 +218,158 @@ def _extract_json_object(raw_text):
         return {k: v for k, v in pairs}
     return None
 
+
+_SCRIPT_NOTES = {
+    "Devanagari script (देवनागरी)": ["hi", "mr", "mai", "ne", "sd", "doi", "sa", "kok"],
+    "Bengali script (বাংলা)": ["bn", "as", "mni"],
+    "Gurmukhi script (ਗੁਰਮੁਖੀ)": ["pa"],
+    "Telugu script (తెలుగు)": ["te"],
+    "Tamil script (தமிழ்)": ["ta"],
+    "Gujarati script (ગુજરાતી)": ["gu"],
+    "Kannada script (ಕನ್ನಡ)": ["kn"],
+    "Malayalam script (മലയാളം)": ["ml"],
+    "Urdu/Perso-Arabic script (اردو)": ["ur", "ks"],
+    "Odia script (ଓଡ଼ିଆ)": ["or"],
+}
+
+
 def _build_translate_prompt(terms_chunk, lang_name, domain_note, lang_code=""):
     terms_json = json.dumps(terms_chunk, ensure_ascii=False)
     script_note = ""
-    if lang_code in ["hi", "mai", "ne", "sd", "doi", "sa"]:
-        script_note = "MUST write EXCLUSIVELY in Devanagari script (देवनागरी)."
-    elif lang_code in ["bn", "as", "mni"]:
-        script_note = "MUST write EXCLUSIVELY in Bengali script (বাংলা)."
-    elif lang_code == "pa":
-        script_note = "MUST write EXCLUSIVELY in Gurmukhi script (ਗੁਰਮੁਖੀ)."
-    elif lang_code == "te":
-        script_note = "MUST write EXCLUSIVELY in Telugu script (తెలుగు)."
-    elif lang_code == "ta":
-        script_note = "MUST write EXCLUSIVELY in Tamil script (தமிழ்)."
-    elif lang_code == "gu":
-        script_note = "MUST write EXCLUSIVELY in Gujarati script (ગુજરાતી)."
-    elif lang_code == "kn":
-        script_note = "MUST write EXCLUSIVELY in Kannada script (ಕನ್ನಡ)."
-    elif lang_code == "ml":
-        script_note = "MUST write EXCLUSIVELY in Malayalam script (മലയാളം)."
-    elif lang_code in ["ur", "ks"]:
-        script_note = "MUST write EXCLUSIVELY in Urdu/Perso-Arabic script (اردو)."
-    elif lang_code == "or":
-        script_note = "MUST write EXCLUSIVELY in Odia script (ଓଡ଼ିଆ)."
+    for script, codes in _SCRIPT_NOTES.items():
+        if lang_code in codes:
+            script_note = f"MUST write EXCLUSIVELY in {script}."
+            break
 
     return (
         f"You are an expert translator for Indian regional languages. Translate each English term below to {lang_name} ({lang_code}). "
         f"CRITICAL RULES: 1. Target Language: {lang_name} ({lang_code}). {script_note} "
         f"2. Return ONLY a raw JSON object mapping each input term to its {lang_name} translation. No markdown, no backticks, no explanation. "
         f"3. Every single key from the input list MUST appear in the output JSON, exactly as written. "
-        f"4. Keep unchanged: chemical/brand names, numbers, and units (kg/ha, Rs, days, ml/L, g/ha, quintal, SL, EC, SC, WP, SG, NPK). "
+        f"4. Keep unchanged: chemical/brand names, numbers, emojis, symbols and units (kg/ha, Rs, days, ml/L, g/ha, quintal, SL, EC, SC, WP, SG, NPK). "
         f"5. {domain_note} 6. Use natural everyday terms a {lang_name}-speaking farmer would recognize. "
         f"Input terms: {terms_json} Output: a single JSON object only."
     )
 
+
 def _translate_via_gemini(prompt, sys_prompt, max_tokens=2048):
+    """Gemini translation with its own key. Returns a dict, or None on any failure.
+    A 429 pauses Gemini translation for GEMINI_TRANSLATE_PAUSE_SEC seconds."""
+    global _gemini_translate_paused_until
     if not GEMINI_TRANSLATE_KEY:
         return None
+    with _gemini_translate_lock:
+        if time.time() < _gemini_translate_paused_until:
+            return None
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TRANSLATE_MODEL}:generateContent"
         headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_TRANSLATE_KEY}
         body = {
             "systemInstruction": {"parts": [{"text": sys_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens}
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": max_tokens,
+                "responseMimeType": "application/json",
+            },
         }
-        resp = requests.post(url, headers=headers, json=body, timeout=20)
-        if resp.status_code == 200:
-            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return _extract_json_object(text)
+        resp = requests.post(url, headers=headers, json=body, timeout=45)
+        if resp.status_code == 429:
+            with _gemini_translate_lock:
+                _gemini_translate_paused_until = time.time() + GEMINI_TRANSLATE_PAUSE_SEC
+            logger.warning(f"[TranslateGemini] 429 - pausing Gemini translation for {GEMINI_TRANSLATE_PAUSE_SEC}s, using Groq")
+            return None
+        if resp.status_code != 200:
+            logger.warning(f"[TranslateGemini] HTTP {resp.status_code}: {resp.text[:150]}")
+            return None
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return _extract_json_object(text)
     except Exception as e:
         logger.warning(f"[TranslateGemini] error: {e}")
     return None
+
 
 def _translate_via_groq(prompt, sys_prompt, max_tokens=2048):
     if not GROQ_API_KEY:
         return None
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    body = {
-        "model": "openai/gpt-oss-20b",
-        "messages": [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.2,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"}
-    }
-    try:
-        resp = post_to_groq(body, headers)
-        if resp and resp.status_code == 200:
-            text = resp.json()["choices"][0]["message"]["content"].strip()
-            return _extract_json_object(text)
-    except Exception as e:
-        logger.warning(f"[TranslateGroq] error: {e}")
+    for model in GROQ_TRANSLATE_MODELS:
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            resp = post_to_groq(body, headers)
+            if resp is not None and resp.status_code == 200:
+                text = resp.json()["choices"][0]["message"]["content"].strip()
+                text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+                parsed = _extract_json_object(text)
+                if parsed:
+                    return parsed
+        except Exception as e:
+            logger.warning(f"[TranslateGroq] {model} error: {e}")
     return None
 
-def _translate_terms_chunk(terms_chunk, lang_name, domain_note, lang_code=""):
+
+def _translate_terms_chunk_full(terms_chunk, lang_name, domain_note, lang_code=""):
+    """Translate one chunk. Returns (translations, returned) where `returned` is the
+    set of terms the model genuinely answered (safe to save). Everything else falls
+    back to the English term so the page still renders."""
     prompt = _build_translate_prompt(terms_chunk, lang_name, domain_note, lang_code)
-    sys_prompt = f"You are an expert Indian regional language translator. You MUST respond with valid JSON only, no other text. Translate everything to {lang_name} ({lang_code}) using its correct native script."
+    sys_prompt = (f"You are an expert Indian regional language translator. You MUST respond with valid JSON only, "
+                  f"no other text. Translate everything to {lang_name} ({lang_code}) using its correct native script.")
     max_tokens = min(8192, 300 + len(terms_chunk) * 150)
-    translations = _translate_via_gemini(prompt, sys_prompt, max_tokens) or _translate_via_groq(prompt, sys_prompt, max_tokens)
-    if not translations:
-        return {term: term for term in terms_chunk}
+    raw = _translate_via_gemini(prompt, sys_prompt, max_tokens) or _translate_via_groq(prompt, sys_prompt, max_tokens)
+    translations, returned = {}, set()
     for term in terms_chunk:
-        if term not in translations or not translations[term]:
+        val = raw.get(term) if isinstance(raw, dict) else None
+        if isinstance(val, str) and val.strip():
+            translations[term] = val
+            returned.add(term)
+        else:
             translations[term] = term
-    return translations
+    return translations, returned
+
+
+def _translate_terms_chunk(terms_chunk, lang_name, domain_note, lang_code=""):
+    """Backwards-compatible wrapper: returns only the translations dict."""
+    return _translate_terms_chunk_full(terms_chunk, lang_name, domain_note, lang_code)[0]
+
 
 def translate_terms(terms, lang_name, domain_note, cache_key, cache_dict, lang_code=""):
+    """Returns (translations, cached).
+    Fixed page text (cache_key is just the language code) is read from / saved to
+    translations/<lang>.json. Dynamic text (cache_key contains '::', e.g. a diagnosis
+    result) is never written to disk."""
     if cache_key in cache_dict:
         return cache_dict[cache_key], True
-    chunks = [terms[i:i + TRANSLATE_CHUNK_SIZE] for i in range(0, len(terms), TRANSLATE_CHUNK_SIZE)]
+
+    terms = list(dict.fromkeys(t for t in terms if isinstance(t, str) and t.strip()))
+    persist = bool(lang_code) and "::" not in str(cache_key)
+    saved = load_saved_translations(lang_code) if persist else {}
+
+    translations, missing = {}, []
+    for term in terms:
+        if term in saved and saved[term]:
+            translations[term] = saved[term]
+        else:
+            missing.append(term)
+
+    if not missing:
+        _bounded_cache_set(cache_dict, cache_key, translations, max_entries=500)
+        return translations, True
+
+    chunks = [missing[i:i + TRANSLATE_CHUNK_SIZE] for i in range(0, len(missing), TRANSLATE_CHUNK_SIZE)]
     results = [None] * len(chunks)
 
     def run_chunk(idx):
-        results[idx] = _translate_terms_chunk(chunks[idx], lang_name, domain_note, lang_code)
+        results[idx] = _translate_terms_chunk_full(chunks[idx], lang_name, domain_note, lang_code)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(TRANSLATE_MAX_WORKERS, len(chunks))) as executor:
         futures = []
@@ -251,20 +379,27 @@ def translate_terms(terms, lang_name, domain_note, cache_key, cache_dict, lang_c
             futures.append(executor.submit(run_chunk, i))
         concurrent.futures.wait(futures)
 
+    to_save, all_returned = {}, set()
     for i, chunk in enumerate(chunks):
-        if results[i] is None:
-            results[i] = {term: term for term in chunk}
-            continue
-        if all(results[i].get(term) == term for term in chunk):
+        res = results[i] or ({t: t for t in chunk}, set())
+        trans, returned = res
+        if not returned:
+            # whole chunk failed - one patient retry (Gemini may be paused, Groq takes over)
             time.sleep(1.0)
-            retried = _translate_terms_chunk(chunk, lang_name, domain_note, lang_code)
-            if any(retried.get(term) != term for term in chunk):
-                results[i] = retried
+            trans2, returned2 = _translate_terms_chunk_full(chunk, lang_name, domain_note, lang_code)
+            if returned2:
+                trans, returned = trans2, returned2
+        translations.update(trans)
+        all_returned |= returned
+        for t in returned:
+            to_save[t] = trans[t]
 
-    translations = {}
-    for r in results:
-        translations.update(r)
-    if any(translations.get(t) != t for t in terms):
+    if persist and to_save:
+        save_new_translations(lang_code, to_save)
+
+    # Only keep it in memory if every term got a real answer; otherwise the next
+    # request retries just the missing ones (saved ones are already on disk).
+    if all(t in all_returned for t in missing):
         _bounded_cache_set(cache_dict, cache_key, translations, max_entries=500)
     return translations, False
 
@@ -305,6 +440,15 @@ _USAGE_FEATURE_LABELS = {
     "translate_diagnose":          ("Diagnose Translation",        "api"),
     "translate_diagnosis_result":  ("Diagnosis Result Translation","api"),
 }
+
+
+def usage_label_for(endpoint):
+    """Blueprint endpoints look like 'market.get_market_data'. Use this in app.py's
+    before_request instead of _USAGE_FEATURE_LABELS.get(ep) so the Usage page keeps
+    its friendly names after the split."""
+    key = (endpoint or "").split(".")[-1]
+    return key, _USAGE_FEATURE_LABELS.get(key, (None, "api"))
+
 
 def load_usage_stats():
     global _usage_stats

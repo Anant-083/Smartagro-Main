@@ -35,8 +35,10 @@ _gemini_quota_exhausted_until = 0.0
 _gemini_quota_lock = threading.Lock()
 GEMINI_QUOTA_SKIP_SEC = 90
 
+
 def ai_is_crop_image(image_b64):
     if not GROQ_API_KEY:
+        logger.info("[Diagnose] Plant check skipped: no Groq key")
         return True, None
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -52,16 +54,24 @@ def ai_is_crop_image(image_b64):
         "max_tokens": 100,
         "response_format": {"type": "json_object"},
     }
+    t0 = time.time()
+    logger.info(f"[Diagnose] Calling Groq for plant check model={vision_models[0]}")
     try:
         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=8)
+        ms = int((time.time() - t0) * 1000)
         if resp.status_code == 200:
             raw = resp.json()["choices"][0]["message"]["content"].strip()
             parsed = json.loads(re.search(r"\{.*\}", raw, re.DOTALL).group())
+            logger.info(f"[Diagnose] Groq plant check OK is_plant={parsed.get('is_plant')} ({ms}ms)")
             if parsed.get("is_plant") is False:
                 return False, parsed.get("reason") or "The photo doesn't appear to show a plant or crop."
+        else:
+            logger.warning(f"[Diagnose] Groq plant check HTTP {resp.status_code} ({ms}ms), allowing image")
         return True, None
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Diagnose] Groq plant check error: {e}, allowing image")
         return True, None
+
 
 def _repair_and_parse_json(text):
     cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
@@ -84,6 +94,7 @@ def _repair_and_parse_json(text):
     except Exception:
         return None
 
+
 def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -98,21 +109,35 @@ def _run_vision_pass(image_b64, prompt, sys_prompt, model, temperature):
         "temperature": temperature,
         "max_tokens": 1400,
     }
+    t0 = time.time()
+    logger.info(f"[Diagnose] Calling Groq for diagnosis model={model}")
     try:
         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=15)
+        ms = int((time.time() - t0) * 1000)
         if resp.status_code == 200:
-            return _repair_and_parse_json(resp.json()["choices"][0]["message"]["content"].strip())
+            parsed = _repair_and_parse_json(resp.json()["choices"][0]["message"]["content"].strip())
+            if parsed:
+                logger.info(f"[Diagnose] Groq OK model={model} ({ms}ms)")
+                return parsed
+            logger.warning(f"[Diagnose] Groq returned unparseable JSON ({ms}ms)")
+        else:
+            logger.warning(f"[Diagnose] Groq HTTP {resp.status_code} ({ms}ms)")
     except Exception as e:
         logger.warning(f"[Diagnose] Groq error: {e}")
     return None
 
+
 def _run_gemini_pass(image_b64, prompt, sys_prompt):
-    if not GEMINI_DIAGNOSE_KEY:
-        return None
+    """Returns (parsed_result, model_name_that_answered) or (None, None)."""
     global _gemini_quota_exhausted_until
+    if not GEMINI_DIAGNOSE_KEY:
+        logger.info("[Diagnose] Gemini skipped: no key set")
+        return None, None
     with _gemini_quota_lock:
-        if time.time() < _gemini_quota_exhausted_until:
-            return None
+        remaining = _gemini_quota_exhausted_until - time.time()
+    if remaining > 0:
+        logger.info(f"[Diagnose] Gemini skipped: paused {int(remaining)}s more after 429")
+        return None, None
 
     body = {
         "system_instruction": {"parts": [{"text": sys_prompt}]},
@@ -126,20 +151,35 @@ def _run_gemini_pass(image_b64, prompt, sys_prompt):
 
     for model_name in GEMINI_MODEL_WATERFALL:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        t0 = time.time()
+        logger.info(f"[Diagnose] Calling Gemini model={model_name}")
         try:
             resp = requests.post(url, headers=headers, json=body, timeout=20)
+            ms = int((time.time() - t0) * 1000)
             if resp.status_code == 200:
                 cands = resp.json().get("candidates", [])
                 if cands:
                     raw = cands[0]["content"]["parts"][0]["text"].strip()
-                    return _repair_and_parse_json(raw)
+                    parsed = _repair_and_parse_json(raw)
+                    if parsed:
+                        logger.info(f"[Diagnose] Gemini OK model={model_name} ({ms}ms)")
+                        return parsed, model_name
+                    logger.warning(f"[Diagnose] Gemini {model_name} returned unparseable JSON ({ms}ms)")
+                else:
+                    logger.warning(f"[Diagnose] Gemini {model_name} returned no candidates ({ms}ms)")
+                continue
             if resp.status_code == 429:
                 with _gemini_quota_lock:
                     _gemini_quota_exhausted_until = time.time() + GEMINI_QUOTA_SKIP_SEC
-                return None
-        except Exception:
+                logger.warning(f"[Diagnose] Gemini 429 on {model_name}: pausing Gemini for {GEMINI_QUOTA_SKIP_SEC}s")
+                return None, None
+            logger.warning(f"[Diagnose] Gemini HTTP {resp.status_code} on {model_name} ({ms}ms), trying next model")
+        except Exception as e:
+            logger.warning(f"[Diagnose] Gemini error on {model_name}: {e}")
             continue
-    return None
+    logger.warning("[Diagnose] Gemini FAILED on all models")
+    return None, None
+
 
 def _diseases_agree(name_a, name_b):
     if not name_a or not name_b: return False
@@ -147,6 +187,7 @@ def _diseases_agree(name_a, name_b):
     if a == b: return True
     if "healthy" in a and "healthy" in b: return True
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.6
+
 
 def _save_diagnosis_image(image_b64, record_id):
     try:
@@ -159,6 +200,7 @@ def _save_diagnosis_image(image_b64, record_id):
     except Exception:
         return None
 
+
 def _log_diagnosis(record):
     try:
         with _diagnosis_log_lock:
@@ -166,6 +208,7 @@ def _log_diagnosis(record):
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
 
 @diagnose_bp.route("/api/diagnose", methods=["POST"])
 def diagnose_crop():
@@ -181,8 +224,11 @@ def diagnose_crop():
     if len(image_b64) > MAX_IMAGE_B64_LEN:
         return jsonify({"error": "Image too large. Under 10 MB required."}), 413
 
+    logger.info(f"[Diagnose] --- New diagnosis request lang={lang} ---")
+
     is_plant, reject_reason = ai_is_crop_image(image_b64)
     if not is_plant:
+        logger.info("[Diagnose] Rejected: not a crop image")
         return jsonify({"not_a_crop_image": True, "error": reject_reason or "Please upload a photo of a crop/plant."}), 422
 
     lang_name = LANG_NAMES.get(lang, "")
@@ -192,24 +238,25 @@ def diagnose_crop():
 
     results, models_used = [], []
     if GEMINI_DIAGNOSE_KEY:
-        try:
-            res = _run_gemini_pass(image_b64, prompt, sys_prompt)
-            if res and res.get("disease"):
-                results.append(res)
-                models_used.append(f"gemini:{GEMINI_DIAGNOSIS_MODEL}")
-        except Exception:
-            pass
+        res, used_model = _run_gemini_pass(image_b64, prompt, sys_prompt)
+        if res and res.get("disease"):
+            results.append(res)
+            models_used.append(f"gemini:{used_model}")
+            logger.info(f"[Diagnose] RESULT from Gemini ({used_model})")
+        else:
+            logger.warning("[Diagnose] Gemini gave no result, falling back to Groq")
 
     if not results and GROQ_API_KEY:
-        try:
-            res = _run_vision_pass(image_b64, prompt, sys_prompt, vision_models[0], 0.2)
-            if res and res.get("disease"):
-                results.append(res)
-                models_used.append(f"groq:{vision_models[0]}")
-        except Exception:
-            pass
+        res = _run_vision_pass(image_b64, prompt, sys_prompt, vision_models[0], 0.2)
+        if res and res.get("disease"):
+            results.append(res)
+            models_used.append(f"groq:{vision_models[0]}")
+            logger.info(f"[Diagnose] RESULT from Groq ({vision_models[0]})")
+        else:
+            logger.warning("[Diagnose] Groq diagnosis also failed")
 
     if not results:
+        logger.error("[Diagnose] BOTH providers failed, returning 500")
         return jsonify({"error": "Vision models unavailable right now."}), 500
 
     primary = max(results, key=lambda r: r.get("confidence", 0))
@@ -222,6 +269,7 @@ def diagnose_crop():
     img_name = _save_diagnosis_image(image_b64, record_id)
     _log_diagnosis({"id": record_id, "timestamp": datetime.now().isoformat(), "result": primary, "image": img_name})
     return jsonify(primary)
+
 
 @diagnose_bp.route('/api/diagnose-log')
 def diagnose_log():
@@ -236,6 +284,7 @@ def diagnose_log():
         pass
     return jsonify({"count": len(entries), "entries": list(reversed(entries))})
 
+
 @diagnose_bp.route('/api/diagnose-log/image/<path:filename>')
 def diagnose_log_image(filename):
     if not DEBUG_MODE:
@@ -246,17 +295,20 @@ def diagnose_log_image(filename):
         return jsonify({"error": "Not found"}), 404
     return send_file(path, mimetype="image/jpeg")
 
+
 @diagnose_bp.route('/api/diagnose-log/review', methods=["POST"])
 def diagnose_log_review():
     if not DEBUG_MODE:
         return jsonify({"error": "Debug mode only"}), 403
     return jsonify({"status": "ok"})
 
+
 @diagnose_bp.route('/api/diagnose-log/accuracy')
 def diagnose_log_accuracy():
     if not DEBUG_MODE:
         return jsonify({"error": "Debug mode only"}), 403
     return jsonify({"accuracy": 92.5})
+
 
 _diagnose_translation_cache = {}
 
@@ -306,6 +358,7 @@ def translate_diagnose():
     domain_note = "UI copy and section labels for crop disease diagnosis. Keep simple for farmers."
     translations, cached = translate_terms(terms, lang_name, domain_note, lang, _diagnose_translation_cache, lang_code=lang)
     return jsonify({"lang": lang, "lang_name": lang_name, "translations": translations, "cached": cached})
+
 
 _diagnosis_result_cache = {}
 
