@@ -86,8 +86,10 @@
   to   { opacity: 1; transform: translateX(0); }
 }
 .weather-card-hero {
-  width: 320px;
+  width: min(320px, 100%);
   min-height: 220px;
+  box-sizing: border-box;
+  container-type: inline-size;
   background: var(--card);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-lg);
@@ -120,11 +122,13 @@
 }
 .hwc-temp {
   font-family: 'Syne', sans-serif;
-  font-size: clamp(2.2rem, 8vw, 4rem); 
+  font-size: clamp(1.6rem, 18cqi, 3rem);
   font-weight: 800;
   color: var(--green);
   line-height: 1;
   margin-bottom: 4px;
+  white-space: nowrap;
+  letter-spacing: -0.035em;
 }
 .hwc-desc {
   font-size: 0.9rem;
@@ -147,7 +151,21 @@
   word-break: break-word;
 }
 .hwc-stat i { color: var(--green); font-size: 0.85rem; }
-.hwc-icon-large { font-size: 3.5rem; text-align: right; }
+.hwc-weather-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3rem;
+  align-items: start;
+  gap: 6px;
+}
+.hwc-weather-details { min-width: 0; }
+.hwc-icon-large {
+  width: 3rem;
+  max-width: 100%;
+  font-size: clamp(1.8rem, 11cqi, 2.4rem);
+  line-height: 1.05;
+  text-align: center;
+  justify-self: end;
+}
 
 /* ── WEATHER SECTION ────────────────── */
 .weather-section { background: var(--bg-2); }
@@ -203,6 +221,7 @@
   transition: var(--trans);
 }
 .weather-stat-card:hover { border-color: var(--border-2); transform: translateY(-3px); box-shadow: var(--shadow); }
+.humidity-icon { width: 20px; height: 20px; fill: currentColor; display: block; }
 .wsc-icon {
   width: 42px; height: 42px;
   border-radius: 10px;
@@ -615,6 +634,8 @@ body.light-theme .cs-weather {
   margin-top: 20px;
 }
 .map-container {
+  position: relative;
+  isolation: isolate;
   height: 350px;
   border-radius: 20px;
   overflow: hidden;

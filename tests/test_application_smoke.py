@@ -75,6 +75,47 @@ class ApplicationSmokeTests(unittest.TestCase):
         self.assertEqual(risk_response.status_code, 200)
         self.assertEqual(risk_response.get_json()["crops"][0]["name"], "Rice")
 
+    def test_15_day_alerts_label_and_window_are_consistent(self):
+        forecast = [{"date": "2026-10-27"} for _ in range(20)]
+        with patch("app.track_usage"):
+            page = self.client.get("/alerts")
+            response = self.client.post(
+                "/api/monthly-alerts",
+                json={"forecast": forecast},
+            )
+
+        self.assertIn(b"15-Day Alerts", page.data)
+        self.assertNotIn(b"Monthly Alerts", page.data)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.get_json()["monthly"]), 15)
+
+    def test_vegetation_result_is_cached_for_rounded_location(self):
+        cache_key = (28.123, 77.456)
+        with weather._vegetation_cache_lock:
+            weather._vegetation_cache.pop(cache_key, None)
+
+        result = {
+            "ndvi": 0.417,
+            "status": "Good Vegetation Cover",
+            "obs_date": "2026-10-20",
+            "source": "Sentinel-2 Satellite L2A",
+            "cloud_pct": 12,
+        }
+        try:
+            with (
+                patch("app.track_usage"),
+                patch.object(weather, "get_sentinel2_ndvi", return_value=result) as get_ndvi,
+            ):
+                first = self.client.get("/api/vegetation?lat=28.1231&lon=77.4561")
+                second = self.client.get("/api/vegetation?lat=28.1232&lon=77.4562")
+
+            self.assertEqual(first.get_json(), result)
+            self.assertEqual(second.get_json(), result)
+            get_ndvi.assert_called_once_with(28.123, 77.456)
+        finally:
+            with weather._vegetation_cache_lock:
+                weather._vegetation_cache.pop(cache_key, None)
+
     def test_weather_route_combines_mocked_current_and_forecast_data(self):
         current_response = Mock(status_code=200, text="")
         current_response.json.return_value = {

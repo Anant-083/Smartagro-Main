@@ -2,6 +2,7 @@ import os
 import re
 import json
 import time
+import threading
 import requests
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,9 @@ if _RASTERIO_AVAILABLE:
     from rasterio.warp import transform as rasterio_warp
 
 weather_bp = Blueprint("weather", __name__)
+_vegetation_cache = {}
+_vegetation_cache_lock = threading.Lock()
+VEGETATION_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 # ─── Visual Crossing Icon Mapping ───────────────────────────────────────────
 _VC_ICON_TO_OWM = {
@@ -318,13 +322,22 @@ def get_vegetation():
 
     def _fallback():
         try:
-            return _estimate_vegetation_health(float(lat), float(lon))
+            return _estimate_vegetation_health(normalized_lat, normalized_lon)
         except Exception:
             return {"ndvi": None, "status": "Data Unavailable", "obs_date": None, "source": "Satellite", "cloud_pct": None}
 
     try:
+        normalized_lat = round(float(lat), 3)
+        normalized_lon = round(float(lon), 3)
+        cache_key = (normalized_lat, normalized_lon)
+        now = time.time()
+        with _vegetation_cache_lock:
+            cached = _vegetation_cache.get(cache_key)
+            if cached and now - cached[0] < VEGETATION_CACHE_TTL_SECONDS:
+                return jsonify(cached[1])
+
         with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(get_sentinel2_ndvi, float(lat), float(lon))
+            future = ex.submit(get_sentinel2_ndvi, normalized_lat, normalized_lon)
             try:
                 ndvi_result = future.result(timeout=8)
             except concurrent.futures.TimeoutError:
@@ -332,6 +345,12 @@ def get_vegetation():
 
         if not ndvi_result:
             return jsonify(_fallback())
+
+        with _vegetation_cache_lock:
+            _vegetation_cache[cache_key] = (time.time(), ndvi_result)
+            if len(_vegetation_cache) > 512:
+                oldest_key = min(_vegetation_cache, key=lambda key: _vegetation_cache[key][0])
+                _vegetation_cache.pop(oldest_key, None)
 
         return jsonify(ndvi_result)
     except Exception as e:

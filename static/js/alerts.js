@@ -384,10 +384,8 @@ async function checkUpcomingRisks() {
     }
 
     try {
-        // 1. Day-wise alerts for the next 7 days (the "weekly" view is
-        // intentionally capped here — the Monthly tab fetches its own
-        // wider window separately in loadMonthlyAlerts(), so this cap
-        // doesn't limit how many real days the Monthly calendar can show).
+        // 1. Day-wise alerts for the next 7 days. The 15-day tab fetches
+        // its additional days separately in loadMonthlyAlerts().
         const weeklyForecast = currentForecast.slice(0, 7);
         const res = await fetch('/api/alerts-forecast', {
             method: 'POST',
@@ -1240,22 +1238,17 @@ async function loadMonthlyAlerts() {
     if (!currentForecast || currentForecast.length === 0) return;
 
     try {
-        // The weekly view above is capped to 7 days on purpose, but the
-        // Monthly calendar is a rolling window covering the full real
-        // forecast range (up to ~15-16 real days from Visual Crossing +
-        // OpenWeather), not bounded to the current calendar month — it can
-        // and will spill into next month near month-end. If that real
-        // window is longer than what the weekly fetch already covered,
-        // fetch alerts for the full window here instead of reusing the
-        // 7-day-capped dailyAlertsData.
+        const forecast15Days = currentForecast.slice(0, 15);
+        // The weekly view is capped to 7 days; fetch alerts for the full
+        // 15-day window here instead of reusing the weekly-only data.
         let monthlyDailyAlerts = dailyAlertsData || [];
-        if (currentForecast.length > (dailyAlertsData ? dailyAlertsData.length : 0)) {
+        if (forecast15Days.length > (dailyAlertsData ? dailyAlertsData.length : 0)) {
             try {
                 const extRes = await fetch('/api/alerts-forecast', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        forecast: currentForecast,
+                        forecast: forecast15Days,
                         today_alerts: allAlerts,
                         city: currentWeather ? currentWeather.city : '',
                         lat: currentWeather ? currentWeather.lat : null,
@@ -1277,12 +1270,12 @@ async function loadMonthlyAlerts() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                forecast: currentForecast,
+                forecast: forecast15Days,
                 daily_alerts: monthlyDailyAlerts
             })
         });
         const data = await res.json();
-        const monthly = data.monthly || [];
+        const monthly = (data.monthly || []).slice(0, 15);
 
 
 

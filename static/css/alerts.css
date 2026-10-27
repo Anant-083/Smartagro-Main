@@ -431,7 +431,15 @@
   gap: 32px;
   align-items: center;
 }
-.chart-canvas-wrap { height: 320px; position: relative; }
+.chart-canvas-wrap {
+  height: 320px;
+  min-width: 0;
+  max-width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+.risk-chart-layout > * { min-width: 0; }
+.chart-canvas-wrap canvas { max-width: 100%; }
 .risk-factors { display: flex; flex-direction: column; gap: 16px; }
 
 .rfi-label {

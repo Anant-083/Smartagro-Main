@@ -437,7 +437,7 @@ def get_monthly_alerts():
         except ValueError:
             pass
     daily_alerts = { d.get("date"): d for d in data.get("daily_alerts", []) }
-    window_days = len(forecast) if forecast else 15
+    window_days = min(len(forecast), 15) if forecast else 15
 
     for i in range(window_days):
         curr_date = base_date + timedelta(days=i)

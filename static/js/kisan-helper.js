@@ -30,9 +30,13 @@
   <span class="kw-pulse kw-helpline-pulse"></span>
 </a>
 
-<div id="kisanToggleBtn" onclick="toggleKisan()" title="Kisan Helper">
+<button id="kisanToggleBtn" type="button" onclick="toggleKisan()" title="Kisan Helper" aria-label="Open Kisan Helper" aria-expanded="false">
   <i class="fas fa-microphone"></i>
   <span class="kw-pulse"></span>
+</button>
+<div id="kisanHelpHint" class="kw-help-hint" role="status" aria-live="polite">
+  <i class="fas fa-circle-question" aria-hidden="true"></i>
+  <span>Need help? Ask Kisan Helper</span>
 </div>
 
 <div id="kisanOverlay" style="display:none">
@@ -149,6 +153,7 @@
   box-shadow: 0 4px 24px rgba(74,222,128,.45);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; z-index: 9999;
+  padding: 0; border: 0; font: inherit;
   transition: transform .2s, box-shadow .2s;
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
@@ -156,6 +161,54 @@
 #kisanToggleBtn i { font-size: 1.4rem; color: #fff; pointer-events: none; }
 #kisanToggleBtn.chat-open { background: linear-gradient(135deg, #991b1b, #ef4444); }
 #kisanToggleBtn.listening { background: linear-gradient(135deg, #991b1b, #ef4444); }
+.kw-help-hint {
+  position: fixed;
+  right: calc(28px + env(safe-area-inset-right, 0px));
+  bottom: calc(98px + env(safe-area-inset-bottom, 0px));
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid var(--border, rgba(74,222,128,.3));
+  border-radius: 14px;
+  background: var(--card, #102013);
+  color: var(--text, #f1f5f1);
+  box-shadow: var(--shadow, 0 8px 24px rgba(0,0,0,.24));
+  font-size: .82rem;
+  font-weight: 600;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity .2s ease, transform .2s ease, visibility .2s ease;
+  pointer-events: none;
+}
+.kw-help-hint.visible,
+#kisanToggleBtn:hover + .kw-help-hint,
+#kisanToggleBtn:focus-visible + .kw-help-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+#kisanToggleBtn[aria-expanded="true"] + .kw-help-hint {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+}
+.kw-help-hint i { color: var(--green, #4ade80); flex-shrink: 0; }
+.kw-help-hint::after {
+  content: '';
+  position: absolute;
+  right: 22px;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  background: var(--card, #102013);
+  border-right: 1px solid var(--border, rgba(74,222,128,.3));
+  border-bottom: 1px solid var(--border, rgba(74,222,128,.3));
+  transform: rotate(45deg);
+}
 .kw-pulse {
   position: absolute; top: -3px; right: -3px;
   width: 13px; height: 13px; background: #f87171; border-radius: 50%;
@@ -471,6 +524,11 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
 
 @media (max-width: 600px) {
   #kisanWindow { border-radius: 16px 16px 0 0; height: min(94vh, 100dvh); }
+  .kw-help-hint {
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: calc(158px + env(safe-area-inset-bottom, 0px));
+    max-width: min(260px, calc(100vw - 24px));
+  }
   #kisanHelpline {
     bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     left: calc(12px + env(safe-area-inset-left, 0px));
@@ -517,6 +575,48 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
   let activeTyper   = null;
   let finalTranscript = '';   // accumulates only isFinal segments
   let currentSessionId = Date.now().toString();
+  let helpHintTimer = null;
+  let helpHintScheduleTimer = null;
+  const HELP_HINT_INITIAL_DELAY_MS = [8_000, 18_000];
+  const HELP_HINT_REPEAT_DELAY_MS = [20_000, 45_000];
+  const HELP_HINT_VISIBLE_MS = 5_000;
+
+  function setKisanHelpHintVisible(visible) {
+    const hint = document.getElementById('kisanHelpHint');
+    if (hint) hint.classList.toggle('visible', visible);
+  }
+
+  function getRandomHelpHintDelay([min, max]) {
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+
+  function scheduleKisanHelpHint([minDelay, maxDelay]) {
+    helpHintScheduleTimer = setTimeout(() => {
+      if (isOpen) return;
+      setKisanHelpHintVisible(true);
+      helpHintTimer = setTimeout(() => {
+        setKisanHelpHintVisible(false);
+        scheduleKisanHelpHint(HELP_HINT_REPEAT_DELAY_MS);
+      }, HELP_HINT_VISIBLE_MS);
+    }, getRandomHelpHintDelay([minDelay, maxDelay]));
+  }
+
+  function stopKisanHelpHintCycle() {
+    clearTimeout(helpHintScheduleTimer);
+    clearTimeout(helpHintTimer);
+    setKisanHelpHintVisible(false);
+  }
+
+  function startKisanHelpHintCycle() {
+    stopKisanHelpHintCycle();
+    if (isOpen) {
+      return;
+    }
+
+    scheduleKisanHelpHint(HELP_HINT_INITIAL_DELAY_MS);
+  }
+
+  startKisanHelpHintCycle();
 
   /* ── Language data — all 23 codes app.py's LANG_NAMES supports ───── */
   const LANG_NAMES = {
@@ -710,10 +810,13 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
     if (!overlay) return;
 
     if (isOpen) {
+      stopKisanHelpHintCycle();
       overlay.style.display = 'flex';
       document.body.style.overflow = 'hidden';
       fab.innerHTML = '<i class="fas fa-times"></i><span class="kw-pulse"></span>';
       fab.classList.add('chat-open');
+      fab.setAttribute('aria-label', 'Close Kisan Helper');
+      fab.setAttribute('aria-expanded', 'true');
       setTimeout(() => overlay.classList.add('open'), 10);
       if (chatHistory.length === 0 && !langChosen) showLangPicker();
       setTimeout(() => {
@@ -725,6 +828,8 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
       document.body.style.overflow = '';
       fab.innerHTML = '<i class="fas fa-microphone"></i><span class="kw-pulse"></span>';
       fab.classList.remove('chat-open');
+      fab.setAttribute('aria-label', 'Open Kisan Helper');
+      fab.setAttribute('aria-expanded', 'false');
       setTimeout(() => { overlay.style.display = 'none'; }, 280);
       stopSpeaking();
       if (activeTyper) activeTyper.finish();
@@ -734,6 +839,7 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
       if (chatHistory.length > 0) {
         setTimeout(() => newKisanChat(), 300);
       }
+      startKisanHelpHintCycle();
     }
     updateHelplineVisibility();
   };

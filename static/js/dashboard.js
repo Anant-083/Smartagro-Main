@@ -389,6 +389,26 @@ if (txData && txData.translations && Object.keys(txData.translations).length) {
    never blocks the rest of the homepage from rendering ─────────────── */
 async function loadVegetationHealth(lat, lon) {
     const container = document.getElementById('vegHealthContainer');
+    const cacheLat = Number(Number(lat).toFixed(3));
+    const cacheLon = Number(Number(lon).toFixed(3));
+    const cacheKey = `smartagro_vegetation_v1:${cacheLat}:${cacheLon}`;
+    const cacheTtlMs = 24 * 60 * 60 * 1000;
+
+    try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+        if (
+            cached &&
+            Date.now() - cached.ts < cacheTtlMs &&
+            cached.data &&
+            typeof cached.data.ndvi === 'number'
+        ) {
+            if (container) renderVegetationHealth(cached.data);
+            return;
+        }
+    } catch (e) {
+        // Continue with the network request if local storage is unavailable or invalid.
+    }
+
     if (container) {
         container.innerHTML = `
         <div class="veg-loading" style="text-align:center;padding:24px 0;opacity:.7">
@@ -397,9 +417,22 @@ async function loadVegetationHealth(lat, lon) {
         </div>`;
     }
     try {
-        const res = await fetch(`/api/vegetation?lat=${lat}&lon=${lon}`);
+        const res = await fetch(`/api/vegetation?lat=${cacheLat}&lon=${cacheLon}`);
+        if (!res.ok) throw new Error(`Vegetation request failed: HTTP ${res.status}`);
         const vegData = await res.json();
-        if (vegData) renderVegetationHealth(vegData);
+        if (vegData) {
+            renderVegetationHealth(vegData);
+            if (typeof vegData.ndvi === 'number') {
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify({
+                        data: vegData,
+                        ts: Date.now(),
+                    }));
+                } catch (e) {
+                    // The backend cache still keeps this location stable for the current process.
+                }
+            }
+        }
     } catch (e) {
         // Non-fatal — leave the card showing "Data Unavailable" rather than
         // breaking the rest of the page.
@@ -426,12 +459,12 @@ function renderHeroCard(w) {
       <div class="hwc-city">
         <i class="fas fa-location-dot" style="color:var(--green)"></i> ${w.city}
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
+      <div class="hwc-weather-row">
+        <div class="hwc-weather-details">
           <div class="hwc-temp">${formatTemp(w.temp)}</div>
           <div class="hwc-desc">${dt(capitalize(w.description)) || capitalize(w.description)}</div>
         </div>
-        <div class="hwc-icon-large">${getWeatherEmoji(w.icon)}</div>
+        <div class="hwc-icon-large" aria-hidden="true">${getWeatherEmoji(w.icon)}</div>
       </div>
       <div class="hwc-stats">
         <div class="hwc-stat"><i class="fas fa-droplets"></i> ${w.humidity}% ${dt('Humidity')}</div>
@@ -466,7 +499,11 @@ function renderWeatherSection(current, forecast) {
       </div>
       <!-- Stat cards -->
       <div class="weather-stat-card">
-        <div class="wsc-icon"><i class="fas fa-droplets"></i></div>
+        <div class="wsc-icon" aria-hidden="true">
+          <svg class="humidity-icon" viewBox="0 0 24 24" focusable="false">
+            <path d="M12 2.5C9.4 6.1 5 11.1 5 15.1a7 7 0 0 0 14 0c0-4-4.4-9-7-12.6Zm0 17.1a4.5 4.5 0 0 1-4.5-4.5c0-1.6 1.4-4 4.5-8.2 3.1 4.2 4.5 6.6 4.5 8.2a4.5 4.5 0 0 1-4.5 4.5Z"/>
+          </svg>
+        </div>
         <div class="wsc-label">${dt('Humidity')}</div>
         <div class="wsc-val">${current.humidity}<span class="wsc-unit">%</span></div>
         <div style="margin-top:auto">
@@ -906,8 +943,8 @@ function renderVegetationHealth(vegData) {
     if (!container || !vegData) return;
 
     const ndvi     = vegData.ndvi;
-    const hasData  = ndvi != null && !!vegData.obs_date;   // true only when a real Sentinel-2 reading came back
     const source   = vegData.source    || 'Sentinel-2 L2A';
+    const hasData  = ndvi != null && !!vegData.obs_date && source.includes('Sentinel-2');
     const cloudPct = vegData.cloud_pct != null ? `${vegData.cloud_pct}% cloud` : '';
     const scorePct = ndvi != null ? Math.max(0, Math.min(100, ndvi * 100)) : 0;
     const ndviDisplay = ndvi != null ? ndvi.toFixed(3) : '—';
@@ -919,10 +956,14 @@ function renderVegetationHealth(vegData) {
     // when we actually got one back from the server. Never fabricate a date.
     const lastObservedLine = hasData
         ? `Last observed: ${vegData.obs_date}${cloudPct ? ' &nbsp;·&nbsp; ' + cloudPct : ''}`
+        : ndvi != null && source.includes('Estimated')
+        ? `Estimated for this location · not a satellite observation`
         : `No recent cloud-free imagery available for this location`;
 
     const descLine = hasData
         ? `Real satellite reflectance at your exact location — Copernicus ${source.replace('Copernicus ', '')} via Earth Search STAC (no login required).`
+        : ndvi != null && source.includes('Estimated')
+        ? `This is a stable agro-climatic estimate for the selected area, not a live satellite reading.`
         : `We couldn't retrieve a real Sentinel-2 reading for this exact spot right now (often due to persistent cloud cover or no recent pass). This is not a fabricated value — try again later.`;
 
     // Same red→orange→yellow→green scale the old bar used, now driving
