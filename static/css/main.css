@@ -10,6 +10,7 @@
   --bg:          #0a0f0a;
   --bg-2:        #0e1510;
   --bg-3:        #131d14;
+  --bg-1:        #0e1510;
   --card:        #131d14;
   --card-hover:  #1a2a1b;
   --border:      rgba(74,222,128,0.12);
@@ -33,6 +34,7 @@
   --text:        #e8f5e9;
   --text-2:      #a7c4a8;
   --text-3:      #6b8c6c;
+  --text-1:      #e8f5e9;
 
   --nav-h:       72px;
   --radius:      16px;
@@ -50,14 +52,31 @@ body.light-theme {
   --bg:          #f0f7f0;
   --bg-2:        #e4f0e4;
   --bg-3:        #d8ebd8;
+  --bg-1:        #ffffff;
   --card:        #ffffff;
   --card-hover:  #f4fbf4;
   --border:      rgba(22,101,52,0.15);
   --border-2:    rgba(22,101,52,0.28);
 
+  --green:       #166534;
+  --green-2:     #15803d;
+  --green-dark:  #14532d;
+  --green-glow:  rgba(22,101,52,0.10);
+
+  --amber:       #a16207;
+  --amber-2:     #854d0e;
+  --amber-dark:  #713f12;
+
+  --teal:        #0f766e;
+  --teal-2:      #0f766e;
+
+  --red:         #b91c1c;
+  --red-2:       #b91c1c;
+
   --text:        #0f2d10;
   --text-2:      #2e5c30;
-  --text-3:      #5a8c5c;
+  --text-3:      #47664a;
+  --text-1:      #0f2d10;
 
   --shadow:      0 4px 24px rgba(0,0,0,0.10);
   --shadow-lg:   0 8px 48px rgba(0,0,0,0.16);
@@ -73,6 +92,26 @@ body.light-theme .hero-grid {
   background-image:
     linear-gradient(rgba(22,101,52,0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(22,101,52,0.06) 1px, transparent 1px);
+}
+body.light-theme .diagnose-hero,
+body.light-theme .market-hero,
+body.light-theme .alerts-hero {
+  background: linear-gradient(160deg, #f4faf4, #e7f3e8, #f0f7f0);
+}
+body.light-theme .btn-primary {
+  color: #ffffff;
+}
+body.light-theme .notif-btn-top-right {
+  background: rgba(22,101,52,0.08);
+  border-color: rgba(22,101,52,0.28);
+  color: var(--green);
+  box-shadow: 0 4px 14px rgba(20,83,45,0.10);
+}
+body.light-theme .notif-btn-top-right:hover,
+body.light-theme .notif-btn-top-right:active {
+  background: var(--green-dark);
+  color: #ffffff;
+  box-shadow: 0 6px 20px rgba(20,83,45,0.20);
 }
 
 /* ── Theme Toggle Button ─────────────────────────────── */
@@ -221,6 +260,31 @@ body {
 a { text-decoration: none; color: inherit; }
 img { max-width: 100%; display: block; }
 button { cursor: pointer; font-family: inherit; border: none; background: none; }
+
+.translate-overlay-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: 50%;
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.translate-overlay-close:hover {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+}
 
 /* ── Scrollbar ───────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
@@ -778,9 +842,7 @@ h1,h2,h3,h4 { font-family: 'Syne', sans-serif; line-height: 1.2; }
   }
 
   /* Hide hamburger — not needed */
-  .hamburger,
-  .settings-btn,
-  #settingsBtn {
+  .hamburger {
     display: none !important;
   }
 
@@ -1601,3 +1663,77 @@ body.light-theme .profile-card-popup { background: #fff; }
 body.light-theme .onboarding-panel { background: #fff; }
 body.light-theme .ob-input { background: #f4faf4; }
 body.light-theme .ob-phone-prefix { background: rgba(22,101,52,0.1); }
+
+@media (max-width: 400px) {
+  .navbar { padding: 0 8px; }
+  .nav-actions { gap: 4px; flex-shrink: 0; }
+  .nav-brand { min-width: 0; gap: 4px; }
+  .brand-icon { width: 32px; height: 32px; }
+  .brand-text { font-size: 0.95rem; }
+  .settings-btn,
+  .theme-toggle,
+  .install-btn { width: 32px; height: 32px; }
+  .lang-btn { padding: 6px 8px; }
+  .upb-avatar { width: 32px; height: 32px; }
+}
+
+@media (max-width: 350px) {
+  .brand-text { display: none; }
+}
+
+@media (max-width: 600px) {
+  button,
+  [role="button"] {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-modal-overlay,
+  .onboarding-overlay {
+    padding: 8px;
+  }
+
+  .settings-modal-panel {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+
+  .settings-section { padding: 12px 16px; }
+  .settings-row { flex-wrap: wrap; gap: 8px; }
+  .settings-row:not(.settings-row-toggle) .settings-label { flex: 1 1 100%; }
+  .settings-volume-wrap { width: 100%; min-width: 0; }
+  .settings-slider { flex: 1; min-width: 0; }
+  .settings-radio-group { width: 100%; min-width: 0; }
+  .settings-radio-opt { min-height: 44px; }
+  .settings-time-input { min-height: 44px; max-width: 100%; }
+  .settings-theme-group { width: 100%; flex-wrap: wrap; }
+  .settings-theme-btn { flex: 1 1 72px; min-height: 44px; }
+  .settings-font-group { flex-wrap: wrap; }
+  .settings-help-btn { max-width: 100%; white-space: normal; }
+  .settings-modal-footer { padding: 10px 16px; flex-wrap: wrap; }
+  .settings-reset-btn,
+  .settings-save-btn {
+    flex: 1 1 130px;
+    min-height: 44px;
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .profile-card-popup {
+    width: min(280px, calc(100vw - 16px));
+    box-sizing: border-box;
+    min-width: 0;
+  }
+  .pcp-actions-row { flex-wrap: wrap; }
+  .pcp-actions-row > button { flex: 1 1 90px; min-height: 44px; }
+
+  .onboarding-panel {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+  .onboarding-header { padding: 24px 20px 16px; }
+  .ob-step { padding: 16px 20px 24px; }
+  .ob-btns-row { flex-wrap: wrap; }
+  .ob-btns-row > button { flex: 1 1 120px; justify-content: center; min-height: 44px; }
+}

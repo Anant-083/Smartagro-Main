@@ -21,11 +21,23 @@ window.SmartAgroSettings = (function () {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       _settings = raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS };
-    } catch (e) { _settings = { ...DEFAULTS }; }
+
+      const savedTheme = localStorage.getItem('smartagro_theme');
+      if ((savedTheme === 'light' || savedTheme === 'dark') && _settings.theme !== 'system') {
+        _settings.theme = savedTheme;
+      }
+    } catch (e) {
+      console.warn('[Settings] Could not load saved settings:', e);
+      _settings = { ...DEFAULTS };
+    }
   }
 
   function _save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_settings)); } catch (e) {}
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(_settings));
+    } catch (e) {
+      console.warn('[Settings] Could not save settings:', e);
+    }
   }
 
   function get(key) { return _settings[key] !== undefined ? _settings[key] : DEFAULTS[key]; }
@@ -45,8 +57,18 @@ window.SmartAgroSettings = (function () {
   }
 
   function applyVolume(v) {
-    window.sagrAudioVolume = Math.max(0, Math.min(100, parseInt(v) || 80));
+    const parsed = Number.parseInt(v, 10);
+    window.sagrAudioVolume = Math.max(0, Math.min(100, Number.isNaN(parsed) ? DEFAULTS.volume : parsed));
   }
+
+  function formatAppTemperature(celsius) {
+    const value = Number(celsius);
+    if (!Number.isFinite(value)) return '—';
+    const useFahrenheit = get('tempUnit') === 'fahrenheit';
+    const displayValue = useFahrenheit ? (value * 9 / 5) + 32 : value;
+    return `${Math.round(displayValue)}°${useFahrenheit ? 'F' : 'C'}`;
+  }
+  window.formatAppTemperature = formatAppTemperature;
 
   function applyTempUnit(unit) {
     window.sagrTempUnit = unit;
@@ -54,7 +76,10 @@ window.SmartAgroSettings = (function () {
       if (typeof renderHeroCard === 'function')       renderHeroCard(window.weatherData.current);
       if (typeof renderWeatherSection === 'function') renderWeatherSection(window.weatherData.current, window.weatherData.forecast);
       if (typeof renderStatBar === 'function')        renderStatBar(window.weatherData.current);
+      const seasonTemp = document.querySelector('#seasonLabel .season-temperature');
+      if (seasonTemp) seasonTemp.textContent = formatAppTemperature(window.weatherData.current.temp);
     }
+    window.dispatchEvent(new CustomEvent('appTempUnitChanged', { detail: { unit } }));
   }
 
   function applyWeightUnit(unit) {
@@ -63,9 +88,13 @@ window.SmartAgroSettings = (function () {
   }
 
   function applyNotifications(enabled) {
-    window.sagrNotificationsEnabled = enabled;
-    if (enabled && window.SmartAgroNotifications) {
-      window.SmartAgroNotifications.requestPermission();
+    window.sagrNotificationsEnabled = Boolean(enabled) &&
+      ('Notification' in window) && Notification.permission === 'granted';
+    if (enabled) {
+      applyNotifFrequency(get('notifFrequency'));
+    } else {
+      if (_notifTimeoutId) { clearTimeout(_notifTimeoutId); _notifTimeoutId = null; }
+      if (_notifIntervalId) { clearInterval(_notifIntervalId); _notifIntervalId = null; }
     }
   }
 
@@ -74,7 +103,7 @@ window.SmartAgroSettings = (function () {
   function applyNotifFrequency(timeStr) {
     if (_notifTimeoutId)  { clearTimeout(_notifTimeoutId);  _notifTimeoutId  = null; }
     if (_notifIntervalId) { clearInterval(_notifIntervalId); _notifIntervalId = null; }
-    if (!timeStr) return;
+    if (!timeStr || !get('notifications')) return;
     const [hh, mm] = timeStr.split(':').map(Number);
     const now  = new Date();
     const next = new Date();
@@ -106,11 +135,13 @@ window.SmartAgroSettings = (function () {
     if (isDark) {
       document.body.classList.remove('light-theme');
       if (icon) { icon.classList.remove('fa-sun'); icon.classList.add('fa-moon'); }
-      localStorage.setItem('smartagro_theme', 'dark');
+      try { localStorage.setItem('smartagro_theme', 'dark'); }
+      catch (e) { console.warn('[Settings] Could not save theme:', e); }
     } else {
       document.body.classList.add('light-theme');
       if (icon) { icon.classList.remove('fa-moon'); icon.classList.add('fa-sun'); }
-      localStorage.setItem('smartagro_theme', 'light');
+      try { localStorage.setItem('smartagro_theme', 'light'); }
+      catch (e) { console.warn('[Settings] Could not save theme:', e); }
     }
     _settings.theme = mode;
     _save();
@@ -128,9 +159,12 @@ window.SmartAgroSettings = (function () {
 
   function _initSystemThemeListener() {
     if (!window.matchMedia) return;
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const onThemeChange = function() {
       if (get('theme') === 'system') applyTheme('system');
-    });
+    };
+    if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', onThemeChange);
+    else if (mediaQuery.addListener) mediaQuery.addListener(onThemeChange);
   }
 
   function init() {
@@ -243,6 +277,9 @@ window.SmartAgroSettings = (function () {
 
     var overlay = document.getElementById('settingsModal');
     if (overlay) overlay.addEventListener('click', function(e) { if (e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && overlay && overlay.classList.contains('visible')) closeModal();
+    });
 
     var volSlider = document.getElementById('settingsVolume');
     var volVal    = document.getElementById('settingsVolumeVal');
@@ -272,19 +309,34 @@ window.SmartAgroSettings = (function () {
 
     var notifToggle = document.getElementById('settingsNotifToggle');
     if (notifToggle) notifToggle.addEventListener('change', function() {
-      if (notifToggle.checked && 'Notification' in window && Notification.permission !== 'granted') {
-        Notification.requestPermission().then(function(result) {
-          if (result !== 'granted') {
-            notifToggle.checked = false;
-            _settings.notifications = false; _save();
-            if (typeof showToast === 'function') showToast('Notification permission denied.', 'warning');
-          } else {
-            set('notifications', true);
-          }
-        });
-      } else {
+      if (!notifToggle.checked) {
         set('notifications', notifToggle.checked);
+        return;
       }
+
+      if (!('Notification' in window) || !window.SmartAgroNotifications) {
+        notifToggle.checked = false;
+        set('notifications', false);
+        if (typeof showToast === 'function') showToast('Device notifications are not supported by this browser.', 'warning');
+        return;
+      }
+
+      if (Notification.permission === 'granted') {
+        set('notifications', true);
+        return;
+      }
+
+      set('notifications', true);
+      notifToggle.disabled = true;
+      window.SmartAgroNotifications.requestPermission(function(granted) {
+        notifToggle.disabled = false;
+        if (!granted) {
+          notifToggle.checked = false;
+          set('notifications', false);
+        } else {
+          applyNotifications(true);
+        }
+      });
     });
 
     var notifTime = document.getElementById('settingsNotifTime');
@@ -324,14 +376,45 @@ window.SmartAgroSettings = (function () {
       _settings = Object.assign({}, DEFAULTS);
       _save();
       Object.keys(_settings).forEach(function(key) { _apply(key, _settings[key]); });
-      closeModal();
-      setTimeout(function() { openModal(); }, 300);
+      _syncModalControls();
       if (typeof showToast === 'function') showToast('Settings reset to defaults.', 'success');
+    });
+  }
+
+  function _syncModalControls() {
+    var volume = document.getElementById('settingsVolume');
+    var volumeValue = document.getElementById('settingsVolumeVal');
+    if (volume) volume.value = get('volume');
+    if (volumeValue) volumeValue.textContent = get('volume') + '%';
+
+    ['weightUnit', 'tempUnit'].forEach(function(setting) {
+      document.querySelectorAll('input[name="' + setting + '"]').forEach(function(radio) {
+        radio.checked = radio.value === get(setting);
+        const label = radio.closest('label[data-value]');
+        if (label) label.classList.toggle('active', radio.checked);
+      });
+    });
+
+    var notifToggle = document.getElementById('settingsNotifToggle');
+    if (notifToggle) {
+      notifToggle.checked = Boolean(get('notifications')) &&
+        ('Notification' in window) && Notification.permission === 'granted';
+    }
+
+    var notifTime = document.getElementById('settingsNotifTime');
+    if (notifTime) notifTime.value = get('notifFrequency');
+
+    document.querySelectorAll('.settings-theme-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.theme === get('theme'));
+    });
+    document.querySelectorAll('.settings-font-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.size === get('fontSize'));
     });
   }
 
   function openModal() {
     if (!document.getElementById('settingsModal')) _injectModal();
+    _syncModalControls();
     requestAnimationFrame(function() {
       var m = document.getElementById('settingsModal');
       if (m) m.classList.add('visible');

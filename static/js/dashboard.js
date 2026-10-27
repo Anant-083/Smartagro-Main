@@ -115,7 +115,7 @@ function showDashTranslateOverlay(langCode) {
     const name = DASH_LANG_DISPLAY_NAMES[langCode] || langCode.toUpperCase();
     overlay.innerHTML = `
       <div class="dash-translate-box" style="position:relative">
-        <button onclick="if (window._dashTranslateController) window._dashTranslateController.abort(); document.getElementById('dashTranslateOverlay').classList.remove('visible')" style="position:absolute;top:8px;right:10px;background:rgba(255,255,255,.1);border:none;color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .2s" onmouseover="this.style.background='rgba(248,113,113,.4)'" onmouseout="this.style.background='rgba(255,255,255,.1)'" title="Cancel">&times;</button>
+        <button class="translate-overlay-close" onclick="if (window._dashTranslateController) window._dashTranslateController.abort(); document.getElementById('dashTranslateOverlay').classList.remove('visible')" title="Cancel">&times;</button>
         <div class="dash-translate-spinner"></div>
         <div class="dash-translate-title">Translating to ${name}<span class="dash-translate-dots"><span>.</span><span>.</span><span>.</span></span></div>
         <div class="dash-translate-sub">First-time translation can take a few seconds. It'll be instant after this.</div>
@@ -420,6 +420,7 @@ function showHeroLoading() {
 function renderHeroCard(w) {
     const card = document.getElementById('heroWeatherCard');
     if (!card) return;
+    const formatTemp = window.formatAppTemperature || (value => `${value}°C`);
     card.innerHTML = `
     <div class="hwc-loaded">
       <div class="hwc-city">
@@ -427,7 +428,7 @@ function renderHeroCard(w) {
       </div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div>
-          <div class="hwc-temp">${w.temp}°</div>
+          <div class="hwc-temp">${formatTemp(w.temp)}</div>
           <div class="hwc-desc">${dt(capitalize(w.description)) || capitalize(w.description)}</div>
         </div>
         <div class="hwc-icon-large">${getWeatherEmoji(w.icon)}</div>
@@ -435,7 +436,7 @@ function renderHeroCard(w) {
       <div class="hwc-stats">
         <div class="hwc-stat"><i class="fas fa-droplets"></i> ${w.humidity}% ${dt('Humidity')}</div>
         <div class="hwc-stat"><i class="fas fa-wind"></i> ${w.wind_speed} m/s ${dt('Wind Speed')}</div>
-        <div class="hwc-stat"><i class="fas fa-temperature-half"></i> ${dt('Feels like')} ${w.feels_like}°C</div>
+        <div class="hwc-stat"><i class="fas fa-temperature-half"></i> ${dt('Feels like')} ${formatTemp(w.feels_like)}</div>
         <div class="hwc-stat"><i class="fas fa-gauge-high"></i> ${w.pressure} hPa</div>
       </div>
     </div>`;
@@ -446,6 +447,7 @@ function renderHeroCard(w) {
 function renderWeatherSection(current, forecast) {
     const section = document.getElementById('weatherSection');
     if (section) section.style.display = '';
+    const formatTemp = window.formatAppTemperature || (value => `${value}°C`);
 
     const mainEl = document.getElementById('weatherMain');
     if (mainEl) {
@@ -456,10 +458,10 @@ function renderWeatherSection(current, forecast) {
           <div style="font-size:4.5rem;line-height:1">${getWeatherEmoji(current.icon)}</div>
         </div>
         <div>
-          <div class="wpc-temp">${current.temp}°C</div>
+          <div class="wpc-temp">${formatTemp(current.temp)}</div>
           <div class="wpc-city"><i class="fas fa-location-dot" style="color:var(--green);margin-right:4px"></i>${current.city}</div>
           <div class="wpc-desc">${dt(capitalize(current.description)) || capitalize(current.description)}</div>
-          <div class="wpc-feels">${dt('Feels like')} ${current.feels_like}°C</div>
+          <div class="wpc-feels">${dt('Feels like')} ${formatTemp(current.feels_like)}</div>
         </div>
       </div>
       <!-- Stat cards -->
@@ -500,8 +502,8 @@ function renderWeatherSection(current, forecast) {
         <div class="fc-icon">${getWeatherEmoji(day.icon)}</div>
         <div class="fc-desc">${dt(capitalize(day.description)) || capitalize(day.description)}</div>
         <div class="fc-temps">
-          <span class="fc-max">${Math.round(day.temp_max)}°</span>
-          <span class="fc-min">${Math.round(day.temp_min)}°</span>
+          <span class="fc-max">${formatTemp(day.temp_max)}</span>
+          <span class="fc-min">${formatTemp(day.temp_min)}</span>
         </div>
         <div style="font-size:0.68rem;color:var(--text-3);margin-top:4px">
           <i class="fas fa-droplets" style="color:#38bdf8"></i> ${day.humidity}%
@@ -532,12 +534,13 @@ function getWindDesc(speed) {
 function renderStatBar(w) {
     const bar = document.getElementById('statsBar');
     if (bar) bar.style.display = '';
+    const formatTemp = window.formatAppTemperature || (value => `${value}°C`);
 
     const setVal = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.textContent = val;
     };
-    setVal('statTemp', `${w.temp}°C`);
+    setVal('statTemp', formatTemp(w.temp));
     setVal('statHumidity', `${w.humidity}%`);
     setVal('statWind', `${w.wind_speed} m/s`);
     setVal('statVisibility', `${w.visibility.toFixed(1)} km`);
@@ -664,7 +667,7 @@ async function loadCropRecommendations(current) {
         const label = document.getElementById('seasonLabel');
         const cityName = data.city || current.city || 'Your Location';
         if (label) {
-            label.innerHTML = `<i class="fas fa-location-dot" style="color:#4ade80;margin-right:4px"></i> <strong>${cityName}</strong> &bull; ${dt(data.season)} (${current.temp}°C, ${current.humidity}% Humidity)`;
+            label.innerHTML = `<i class="fas fa-location-dot" style="color:#4ade80;margin-right:4px"></i> <strong>${cityName}</strong> &bull; ${dt(data.season)} (<span class="season-temperature">${(window.formatAppTemperature || (value => `${value}°C`))(current.temp)}</span>, ${current.humidity}% Humidity)`;
         }
     } catch (err) {
         console.error('Crop API error:', err);

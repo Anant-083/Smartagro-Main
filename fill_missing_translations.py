@@ -12,9 +12,11 @@ What it does
      translations-extra.js.
 
 It is safe to stop and re-run: finished strings are kept, only the rest is retried.
-Hindi and Bengali are hand-written in translations-extra.js, so they are skipped.
-Have a native speaker read a sample of each language before the demo.
+Existing Hindi and Bengali translations are preserved; generated values only fill
+missing or English fallback strings. Have a native speaker review samples before
+the demo.
 """
+import argparse
 import ast
 import json
 import os
@@ -22,15 +24,19 @@ import re
 import sys
 import time
 
-from shared import LANG_NAMES, _translate_terms_chunk_full
+from shared import (
+    GEMINI_TRANSLATE_KEY,
+    GROQ_API_KEY,
+    LANG_NAMES,
+    _translate_terms_chunk_full,
+)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "static", "js", "translations.js")
 GEN_JSON = os.path.join(ROOT, "translations_generated.json")
 OUT_JS = os.path.join(ROOT, "static", "js", "translations-generated.js")
 
-PICKER = ["hi", "pa", "mr", "te", "ta", "bn", "gu", "kn", "ml", "or", "as", "ur"]
-SKIP = {"hi", "bn"}          # already hand-written in translations-extra.js
+PICKER = sorted(code for code in LANG_NAMES if code != "en")
 CHUNK = 40                   # terms per request
 PAUSE_BETWEEN_CHUNKS = 4     # seconds, keeps you under per-minute limits
 PAUSE_BETWEEN_PASSES = 30    # seconds
@@ -89,12 +95,23 @@ def write_js(gen):
         f.write(js)
 
 
-def main():
+def main(argv=None):
     if not os.path.exists(SRC):
         sys.exit(f"Cannot find {SRC}. Run this from the project root.")
 
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "languages",
+        nargs="*",
+        choices=PICKER,
+        help="translate only these language codes (default: all non-English languages)",
+    )
+    args = parser.parse_args(argv)
+    if not (GEMINI_TRANSLATE_KEY or GROQ_API_KEY):
+        parser.error("Set GEMINI_API_KEY_TRANSLATE (or GEMINI_API_KEY) or GROQ_API_KEY first.")
+
     T = parse_translations(SRC)
-    EN = {k: v.replace("23 languages", "13 languages") for k, v in T.get("en", {}).items()}
+    EN = T.get("en", {})
     if not EN:
         sys.exit("Could not read the English block from translations.js")
 
@@ -103,11 +120,7 @@ def main():
         with open(GEN_JSON, encoding="utf-8") as f:
             gen = json.load(f)
 
-    langs = [l for l in PICKER if l not in SKIP]
-    if len(sys.argv) > 1:
-        langs = [l for l in sys.argv[1:] if l in PICKER]
-
-    for lang in langs:
+    for lang in args.languages or PICKER:
         have = T.get(lang, {})
         done_keys = gen.setdefault(lang, {})
         need = {}

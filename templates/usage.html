@@ -17,6 +17,7 @@
     .btn { background: #14532d; color: #fff; border: 1px solid #22c55e; border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
     .btn:hover { background: #166534; }
     .btn.danger { background: #450a0a; border-color: #ef4444; color: #fca5a5; }
+    .table-wrap { width: 100%; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; overflow: hidden; }
     th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #1f2937; font-size: 13px; }
     th { color: #9ca3af; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
@@ -44,10 +45,12 @@
     <span id="err" style="color:#f87171;font-size:12px"></span>
   </div>
 
-  <table>
-    <thead><tr><th>Feature</th><th>Type</th><th>Uses</th><th>Share</th><th>Last used</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Feature</th><th>Type</th><th>Uses</th><th>Share</th><th>Last used</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
 
   <div class="daily" id="daily"></div>
 

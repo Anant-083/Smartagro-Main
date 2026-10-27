@@ -3,8 +3,9 @@ let currentImageDataUrl = null;
 let remedyChartInst = null;
 let cameraStream = null;
 
-// Stores the raw (English) diagnosis result so we can re-translate on lang change
+// Keep the initial localized result and its English source for language switches.
 let _lastDiagnosisResult = null;
+const _diagnoseTranslationFiles = new Map();
 
 // Session diagnose history: [{ id, timestamp, image, data }]
 const DIAG_HISTORY_KEY = 'smartagro_diagnose_history';
@@ -49,7 +50,7 @@ const DIAGNOSE_LANG_DISPLAY_NAMES = {
     ne: 'नेपाली',
     sd: 'سنڌي',
     kok: 'कोंकणी',
-    mni: 'মৈতৈলোন্',
+    mni: 'ꯃꯩꯇꯩꯂꯣꯟ',
     bodo: 'बड़ो',
     doi: 'डोगरी',
     sa: 'संस्कृत',
@@ -127,10 +128,10 @@ function showDiagnoseTranslateOverlay(langCode) {
     const name = DIAGNOSE_LANG_DISPLAY_NAMES[langCode] || langCode.toUpperCase();
     overlay.innerHTML = `
       <div class="diagnose-translate-box" style="position:relative">
-        <button onclick="document.getElementById('diagnoseTranslateOverlay').classList.remove('visible')" style="position:absolute;top:8px;right:10px;background:rgba(255,255,255,.1);border:none;color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .2s" onmouseover="this.style.background='rgba(248,113,113,.4)'" onmouseout="this.style.background='rgba(255,255,255,.1)'" title="Cancel">&times;</button>
+        <button class="translate-overlay-close" onclick="document.getElementById('diagnoseTranslateOverlay').classList.remove('visible')" title="${tr('Cancel')}">&times;</button>
         <div class="diagnose-translate-spinner"></div>
-        <div class="diagnose-translate-title">Translating to ${name}<span class="diagnose-translate-dots"><span>.</span><span>.</span><span>.</span></span></div>
-        <div class="diagnose-translate-sub">First-time translation can take a few seconds. It'll be instant after this.</div>
+        <div class="diagnose-translate-title">${tr('Translating to')} ${name}<span class="diagnose-translate-dots"><span>.</span><span>.</span><span>.</span></span></div>
+        <div class="diagnose-translate-sub">${tr("First-time translation can take a few seconds. It'll be instant after this.")}</div>
       </div>`;
     requestAnimationFrame(() => overlay.classList.add('visible'));
 }
@@ -150,41 +151,80 @@ async function loadDiagnoseTranslations(lang) {
     lang = (lang || getLang()).toLowerCase().trim();
     if (lang === 'en') {
         window.diagnoseTx = {};
+        if (typeof applyTranslations === 'function') applyTranslations();
         applyDiagnoseStaticTranslations();
+        if (_lastDiagnosisResult) await renderDiagnosisResults(_lastDiagnosisResult);
         return;
     }
 
-    // ── Instant static translation from pre-baked T object ──
-    if (typeof T !== 'undefined' && T[lang]) {
-        window.diagnoseTx = { ...T[lang] };
-        applyDiagnoseStaticTranslations();
+    const staticTx = (typeof T !== 'undefined' && T[lang]) ? T[lang] : {};
+    let fileTranslations = {};
+    let needsFallback = false;
+    try {
+        let filePromise = _diagnoseTranslationFiles.get(lang);
+        if (!filePromise) {
+            filePromise = fetch(`/translations/${encodeURIComponent(lang)}.json`)
+                .then(async res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                        throw new Error('Invalid translation file');
+                    }
+                    return {
+                        translations: data,
+                        complete: res.headers.get('X-Diagnose-Translations-Complete') === 'true'
+                    };
+                });
+            _diagnoseTranslationFiles.set(lang, filePromise);
+        }
+        const fileData = await filePromise;
+        fileTranslations = fileData.translations;
+        needsFallback = !fileData.complete;
+    } catch (err) {
+        _diagnoseTranslationFiles.delete(lang);
+        console.warn('[DiagnoseTranslate] static translation file unavailable:', err);
+        needsFallback = true;
     }
+
+    window.diagnoseTx = { ...staticTx, ...fileTranslations };
+    if (typeof applyTranslations === 'function') applyTranslations();
+    applyDiagnoseStaticTranslations();
 
     const isGlobal = document.getElementById('txTimerOverlay')?.classList.contains('visible');
-    if (!isGlobal) showDiagnoseTranslateOverlay(lang);
-
-    try {
-        const res = await fetch('/api/translate-diagnose', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lang })
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const staticTx = (typeof T !== 'undefined' && T[lang]) ? T[lang] : {};
-        window.diagnoseTx = { ...staticTx, ...(data.translations || {}) };
-    } catch (err) {
-        console.warn('[DiagnoseTranslate] fetch failed:', err);
-        window.diagnoseTx = {};
+    if (needsFallback) {
+        if (!isGlobal) showDiagnoseTranslateOverlay(lang);
+        try {
+            const res = await fetch('/api/translate-diagnose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lang })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            window.diagnoseTx = {
+                ...window.diagnoseTx,
+                ...(data.translations || {})
+            };
+            if (data.cached === true) {
+                _diagnoseTranslationFiles.set(lang, Promise.resolve({
+                    translations: { ...fileTranslations, ...(data.translations || {}) },
+                    complete: true
+                }));
+            }
+        } catch (err) {
+            console.warn('[DiagnoseTranslate] live fallback failed:', err);
+        } finally {
+            if (!isGlobal) hideDiagnoseTranslateOverlay();
+        }
     }
 
+    if (typeof applyTranslations === 'function') applyTranslations();
     applyDiagnoseStaticTranslations();
     if (_lastDiagnosisResult) {
         await renderDiagnosisResults(_lastDiagnosisResult);
     } else {
         resetResultsPanel();
     }
-    if (!isGlobal) hideDiagnoseTranslateOverlay();
 }
 
 /**
@@ -451,7 +491,7 @@ async function openCamera() {
 
     if (!modal || !video) {
         console.error('[Camera] #cameraModal or #cameraFeed missing from the page');
-        showToast('Camera view is missing from the page.', 'error');
+        showToast(tr('Camera view is missing from the page.'), 'error');
         return;
     }
 
@@ -502,13 +542,13 @@ async function openCamera() {
         if (uploadZone && !currentImageBase64) uploadZone.style.display = '';
 
         const reasons = {
-            NotAllowedError:  'Camera blocked. Allow camera for this site in the address bar, and check Windows camera privacy settings.',
-            SecurityError:    'Camera blocked by browser security. Open the app on localhost or HTTPS.',
-            NotFoundError:    'No camera found on this device.',
-            NotReadableError: 'Camera is being used by another app. Close it and try again.',
-            InsecureContext:  'Camera needs localhost or HTTPS. Do not open the app by IP address.',
+            NotAllowedError:  tr('Camera blocked. Allow camera for this site in the address bar, and check Windows camera privacy settings.'),
+            SecurityError:    tr('Camera blocked by browser security. Open the app on localhost or HTTPS.'),
+            NotFoundError:    tr('No camera found on this device.'),
+            NotReadableError: tr('Camera is being used by another app. Close it and try again.'),
+            InsecureContext:  tr('Camera needs localhost or HTTPS. Do not open the app by IP address.'),
         };
-        showToast(reasons[err.name] || ('Camera error: ' + (err.name || err.message)), 'error');
+        showToast(reasons[err.name] || (tr('Camera error') + ': ' + (err.name || err.message)), 'error');
 
         // Permission and busy-camera errors: do not open a file picker, it only confuses.
         // Other errors (no camera, insecure page on a phone): fall back to the native picker.
@@ -538,7 +578,7 @@ function closeCamera() {
 function capturePhoto() {
     const video = document.getElementById('cameraFeed');
     if (!video || !video.videoWidth) {
-        showToast('Camera is not ready yet. Wait a second and try again.', 'warning');
+        showToast(tr('Camera is not ready yet. Wait a second and try again.'), 'warning');
         return;
     }
     const canvas = document.createElement('canvas');
@@ -548,7 +588,7 @@ function capturePhoto() {
 
     canvas.toBlob(blob => {
         if (!blob) {
-            showToast('Could not capture the photo. Try again.', 'error');
+            showToast(tr('Could not capture the photo. Try again.'), 'error');
             return;
         }
         const file = new File([blob], 'capture.jpg', { type: 'image/jpeg' });
@@ -612,7 +652,7 @@ async function analyzeImage() {
         }
 
         if (data.not_a_crop_image) {
-            showToast(data.error || tr("That doesn't look like a plant photo."), 'error');
+            showToast(data.error ? tr(data.error) : tr("That doesn't look like a plant photo."), 'error');
             if (panel) panel.innerHTML = `
               <div class="results-placeholder">
                 <div class="placeholder-icon" style="opacity:1;color:var(--amber)">
@@ -631,7 +671,7 @@ async function analyzeImage() {
             throw new Error(data.error || `Server responded ${res.status}`);
         }
 
-        // Store raw English result for re-translation on language switch
+        // Keep both the localized first-view result and the English source for later switches.
         _lastDiagnosisResult = data;
         // Expose globally for chatbot integration
         window.lastDiagnoseResult = data;
@@ -653,11 +693,16 @@ async function analyzeImage() {
               <i class="fas fa-circle-xmark"></i>
             </div>
             <h3 style="color:var(--red)">${tr('Analysis Failed')}</h3>
-            <p>${tr('Could not process the image.')}<br>${tr('Make sure your API key is set and the image is clear.')}</p>
+            <p>${tr('No diagnosis was generated. No sample result was substituted.')}</p>
+            <p id="diagnosisFailureDetails">${tr('Could not process the image.')}</p>
             <button class="btn-secondary" style="margin-top:16px" onclick="analyzeImage()">
               <i class="fas fa-rotate"></i> ${tr('Try Again')}
             </button>
           </div>`;
+        const failureDetails = document.getElementById('diagnosisFailureDetails');
+        if (failureDetails && err instanceof Error && err.message) {
+            failureDetails.textContent = err.message;
+        }
     } finally {
         if (analyzeBtn) {
             analyzeBtn.innerHTML = `<i class="fas fa-wand-magic-sparkles"></i> ${tr('Analyze Crop')}<div class="btn-shine"></div>`;
@@ -668,36 +713,112 @@ async function analyzeImage() {
 
 /* ══════════════════════════════════════════════
    RENDER DIAGNOSIS RESULTS
-   Fetches translated result fields from the server
-   before building the HTML so every visible string
-   is already in the selected language.
 ══════════════════════════════════════════════ */
+function diagnosisResultTextTerms(result) {
+    const terms = [];
+    const add = value => {
+        if (typeof value === 'string' && value.trim() && !terms.includes(value.trim())) {
+            terms.push(value.trim());
+        }
+    };
+
+    add(result.disease);
+    add(result.severity);
+    add(result.affected_part);
+    add(result.cause);
+    add(result.recovery_timeline);
+    add(result.offline_notice);
+    for (const remedy of result.eco_remedies || []) {
+        add(remedy.remedy);
+        add(remedy.method);
+        add(remedy.frequency);
+    }
+    for (const remedy of result.chemical_remedies || []) {
+        add(remedy.name);
+        add(remedy.interval);
+        add(remedy.dose);
+    }
+    for (const tip of result.prevention || []) add(tip);
+    return terms;
+}
+
+async function diagnosisResultDigest(terms) {
+    if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') return null;
+    const bytes = new TextEncoder().encode(JSON.stringify(terms));
+    const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function renderDiagnosisResults(data) {
     const panel = document.getElementById('resultsPanel');
     if (!panel) return;
 
     const lang = getLang();
-
-    // ── Fetch translated result fields ──────────────────
-    // Skip if the /api/diagnose call already returned the result in the
-    // selected language (data._lang matches current lang) to avoid a
-    // redundant second round-trip.
-    let tx = {};  // map: english_string -> translated_string
-    const resultAlreadyTranslated = data._lang && data._lang === lang;
-    if (lang !== 'en' && !resultAlreadyTranslated) {
+    const isOriginalLanguage = data._lang === lang;
+    const englishSource = data._english_source || (data._lang === 'en' ? data : null);
+    const sourceResult = isOriginalLanguage ? data : englishSource;
+    if (!sourceResult) {
+        console.warn('[DiagnoseResult] English source unavailable for language switch');
+    }
+    let resultData = sourceResult || data;
+    let tx = {};
+    if (!isOriginalLanguage && lang !== 'en' && sourceResult) {
+        const terms = diagnosisResultTextTerms(sourceResult);
+        let cacheKey = null;
         try {
-            const res = await fetch('/api/translate-diagnosis-result', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lang, result: data })
-            });
-            if (res.ok) {
-                const d = await res.json();
-                tx = d.translations || {};
-            }
-        } catch (e) {
-            console.warn('[DiagnoseResult] translation fetch failed:', e);
+            const digest = await diagnosisResultDigest(terms);
+            if (digest) cacheKey = `smartagro_diagnosis_tx_${lang}_${digest}`;
+        } catch (err) {
+            console.warn('[DiagnoseResult] could not hash English result:', err);
         }
+
+        if (cacheKey) {
+            try {
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+                        terms.every(term => typeof parsed[term] === 'string' && parsed[term])) {
+                        tx = parsed;
+                    }
+                }
+            } catch (err) {
+                console.warn('[DiagnoseResult] browser translation cache unavailable:', err);
+            }
+        }
+
+        if (!Object.keys(tx).length) {
+            const missing = terms.filter(term => !window.diagnoseTx?.[term]);
+            tx = Object.fromEntries(
+                terms.filter(term => window.diagnoseTx?.[term])
+                    .map(term => [term, window.diagnoseTx[term]])
+            );
+            let complete = missing.length === 0;
+            if (missing.length) {
+                try {
+                    const res = await fetch('/api/translate-diagnosis-result', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lang, result: sourceResult })
+                    });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const response = await res.json();
+                    tx = { ...tx, ...(response.translations || {}) };
+                    complete = response.cached === true;
+                } catch (err) {
+                    console.warn('[DiagnoseResult] translation fallback failed:', err);
+                }
+            }
+            if (complete && cacheKey && Object.keys(tx).length) {
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(tx));
+                } catch (err) {
+                    console.warn('[DiagnoseResult] could not persist browser translation cache:', err);
+                }
+            }
+        }
+    } else if (lang === 'en' && englishSource) {
+        resultData = englishSource;
     }
 
     // Helper: translate a result field string
@@ -708,24 +829,36 @@ async function renderDiagnosisResults(data) {
     };
 
     // ── Build translated data object ─────────────────────
-    const disease = tField(data.disease) || tr('Unknown Disease');
-    const severity = tField(data.severity) || '';
-    const affectedPart = tField(data.affected_part) || '';
-    const cause = tField(data.cause) || '';
-    const timeline = tField(data.recovery_timeline) || '';
+    const disease = tField(resultData.disease) || tr('Unknown Disease');
+    const severity = tField(resultData.severity) || '';
+    const affectedPart = tField(resultData.affected_part) || '';
+    const cause = tField(resultData.cause) || '';
+    const timeline = tField(resultData.recovery_timeline) || '';
+    const offlineNotice = tField(resultData.offline_notice) || '';
 
-    const ecoList = (data.eco_remedies || []).map(r => ({
+    const ecoList = (resultData.eco_remedies || []).map(r => ({
         remedy: tField(r.remedy),
         method: tField(r.method),
         frequency: tField(r.frequency),
         effectiveness: r.effectiveness
     }));
-    const chemList = (data.chemical_remedies || []).map(c => ({
+    const chemList = (resultData.chemical_remedies || []).map(c => ({
         name: tField(c.name),
         dose: tField(c.dose),
         interval: tField(c.interval)
     }));
-    const prevList = (data.prevention || []).map(tip => tField(tip));
+    const prevList = (resultData.prevention || []).map(tip => tField(tip));
+    window.currentRenderedDiagnosisResult = {
+        ...resultData,
+        disease,
+        severity,
+        affected_part: affectedPart,
+        cause,
+        recovery_timeline: timeline,
+        eco_remedies: ecoList,
+        chemical_remedies: chemList,
+        prevention: prevList
+    };
 
     // ── UI label translations ───────────────────────────
     const lCause = tr('Cause');
@@ -740,8 +873,8 @@ async function renderDiagnosisResults(data) {
     const lEffect = tr('effectiveness');
     const lDisclaimer = tr('AI-generated diagnosis for guidance only. Consult a local agronomist for critical crop decisions.');
 
-    const sevClass = `badge-severity-${(data.severity || 'mild').toLowerCase()}`;
-    const isHealthy = (data.disease || '').toLowerCase().includes('healthy');
+    const sevClass = `badge-severity-${(resultData.severity || 'mild').toLowerCase()}`;
+    const isHealthy = (resultData.disease || '').toLowerCase().includes('healthy');
 
     panel.innerHTML = `
     <div class="results-content">
@@ -764,6 +897,14 @@ async function renderDiagnosisResults(data) {
       </div>
 
       <div class="result-body">
+
+        ${data.offline_fallback && offlineNotice ? `
+          <div class="result-section" style="padding:10px 14px;background:rgba(251,191,36,0.05);
+                      border:1px solid rgba(251,191,36,0.2);border-radius:8px;
+                      font-size:0.78rem;color:var(--text-2);line-height:1.55">
+            <i class="fas fa-triangle-exclamation" style="color:var(--amber);margin-right:4px"></i>
+            ${offlineNotice}
+          </div>` : ''}
 
         <!-- Cause -->
         ${cause ? `
@@ -856,7 +997,7 @@ async function renderDiagnosisResults(data) {
           cursor:pointer;transition:background 0.2s;font-family:inherit;"
           onmouseover="this.style.background='rgba(74,222,128,0.15)'"
           onmouseout="this.style.background='rgba(74,222,128,0.08)'">
-          <i class="fas fa-share-nodes"></i> Share Diagnosis Result
+          <i class="fas fa-share-nodes"></i> ${tr('Share Diagnosis Result')}
         </button>
 
       </div><!-- /.result-body -->
@@ -1100,7 +1241,7 @@ window.clearDiagnoseHistory = function() {
     } catch(e) {}
     renderDiagnoseHistoryPanel();
     if (typeof showToast === 'function') {
-        showToast('History cleared', 'info', 2000);
+        showToast(tr('History cleared'), 'info', 2000);
     }
 };
 
@@ -1112,7 +1253,7 @@ window.deleteHistoryEntry = function(index, event) {
     } catch(e) {}
     renderDiagnoseHistoryPanel();
     if (typeof showToast === 'function') {
-        showToast('History item deleted', 'info', 2000);
+        showToast(tr('History item deleted'), 'info', 2000);
     }
 };
 
@@ -1160,8 +1301,8 @@ async function shareDiagnoseResult() {
         if (typeof showToast === 'function') showToast(tr('No diagnosis result to share yet.'), 'warning');
         return;
     }
-    const d = _lastDiagnosisResult;
-    const disease = d.disease || 'Unknown';
+    const d = window.currentRenderedDiagnosisResult || _lastDiagnosisResult;
+    const disease = d.disease || tr('Unknown');
     const severity = d.severity || '';
     const conf = d.confidence ? `${d.confidence}%` : '';
     const cause = d.cause || '';
@@ -1171,16 +1312,16 @@ async function shareDiagnoseResult() {
 
     // Build unified photo caption (concise, high-impact, formatted for WhatsApp single-bubble caption)
     const captionLines = [
-        `🌾 *SmartAgro Crop Diagnosis*`,
-        `🔬 *Disease:* ${disease}`,
-        severity ? `⚠️ *Severity:* ${severity}` : '',
-        conf     ? `🎯 *AI Confidence:* ${conf}` : '',
-        cause    ? `ℹ️ *Cause:* ${cause.length > 130 ? cause.slice(0, 127) + '...' : cause}` : '',
-        timeline ? `⏱️ *Recovery:* ${timeline}` : '',
-        ecoRems  ? `🌿 *Eco Remedies:*\n${ecoRems.length > 180 ? ecoRems.slice(0, 177) + '...' : ecoRems}` : '',
-        chemRems ? `⚗️ *Chemical Options:*\n${chemRems.length > 130 ? chemRems.slice(0, 127) + '...' : chemRems}` : '',
+        `🌾 *${tr('SmartAgro Crop Diagnosis')}*`,
+        `🔬 *${tr('Disease')}:* ${disease}`,
+        severity ? `⚠️ *${tr('Severity')}:* ${severity}` : '',
+        conf     ? `🎯 *${tr('AI Confidence')}:* ${conf}` : '',
+        cause    ? `ℹ️ *${tr('Cause')}:* ${cause.length > 130 ? cause.slice(0, 127) + '...' : cause}` : '',
+        timeline ? `⏱️ *${tr('Recovery')}:* ${timeline}` : '',
+        ecoRems  ? `🌿 *${tr('Eco Remedies')}:*\n${ecoRems.length > 180 ? ecoRems.slice(0, 177) + '...' : ecoRems}` : '',
+        chemRems ? `⚗️ *${tr('Chemical Remedies')}:*\n${chemRems.length > 130 ? chemRems.slice(0, 127) + '...' : chemRems}` : '',
         '─'.repeat(26),
-        'Shared via SmartAgro App'
+        tr('Shared via SmartAgro App')
     ].filter(Boolean);
     const photoCaption = captionLines.join('\n');
 

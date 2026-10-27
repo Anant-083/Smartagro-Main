@@ -57,13 +57,38 @@ Weather-driven alerts · Crop disease diagnosis · Live mandi prices · Satellit
 | | |
 |---|---|
 | 🏠 **Dashboard** | Current weather, multi-day forecast, crop recommendations for the farmer's location. |
-| 🩺 **Diagnose Crop** (`/diagnose`) | Upload a photo of a diseased leaf/stem/fruit/root → disease name, severity, cause, eco-friendly + chemical remedies, and prevention tips. Runs a self-consistency ensemble (multiple passes) plus an optional independent second model for cross-checked confidence. |
+| 🩺 **Diagnose Crop** (`/diagnose`) | Upload a crop photo for hosted AI diagnosis and remedy guidance. If Gemini, Groq, and Gemma are unavailable, a packaged local model can classify 15 tomato, potato, and bell-pepper leaf classes. |
 | 🚨 **Alerts** (`/alerts`) | Day-by-day weather-driven agricultural risk alerts, a monthly risk calendar, and general seasonal advisories. |
 | 💰 **Market Prices** (`/market`) | Live government mandi (wholesale market) prices for crops by state, sourced from the official Agmarknet dataset. Filtered to real crops only — livestock/poultry, ornamental flowers, and timber entries that appear in the raw government feed are excluded. |
 | 🛰️ **Vegetation Health (NDVI)** | Satellite-derived crop health index from Sentinel-2 imagery. |
 | 💬 **Kisan Helper Chatbot** | Multilingual AI assistant restricted to agriculture topics, with live weather/market data available to it as tools, voice input (speech-to-text), and full app navigation via chat. |
+| 🌐 **Language selector** | 23 choices: English and 22 Indian languages, including Sanskrit, Santali, and Manipuri. |
 | 📲 **PWA support** | Installable, works offline via a service worker with an offline fallback page. |
 | 📊 **Usage tracking** (`/usage`) | Dashboard of API call counts. |
+
+Diagnosis-page translations and a common crop-disease glossary are served from `translations/<language>.json`. To generate or resume them before deployment, set `GEMINI_API_KEY_TRANSLATE` (or `GEMINI_API_KEY`) or `GROQ_API_KEY`, then run:
+
+```bash
+python generate_diagnose_translations.py
+```
+
+Optionally pass language codes to generate only selected files, for example `python generate_diagnose_translations.py mai sa`. Progress is saved after each translated chunk, so rerunning resumes missing terms.
+
+The global app interface also has a resumable translation-fill helper. It uses the same translation keys, fills missing or English fallback strings for all 22 non-English languages, and writes a script that is loaded by the pages and precached for offline use:
+
+```bash
+python fill_missing_translations.py
+```
+
+You can optionally pass language codes such as `python fill_missing_translations.py kok doi`. Existing hand-written translations are preserved. Review translations with native speakers before presenting them.
+
+The diagnosis route tries Gemini, then Groq, then Google Gemma (`gemma-3-27b-it` by default), and uses a CPU ONNX fallback only if none returns a diagnosis. Configure the Gemma API key with `GEMMA_API_KEY` (or `GEMMA_API_KEY_DIAGNOSE`) and optionally change the model with `GEMMA_DIAGNOSIS_MODEL`. The pinned [MIT-licensed PlantVillage model](https://huggingface.co/imaflower/plantvillage-mobilenetv3) is downloaded and checksum-verified during Docker builds. For local development, download it once with:
+
+```bash
+python scripts/download_offline_diagnosis_model.py
+```
+
+The offline model only covers 15 leaf classes for tomato, potato, and bell pepper. Its model card reports 99.77% test accuracy, but SmartAgro has not independently validated that score or tested field-photo performance. The displayed score is not calibrated; predictions for other crops or field conditions may be wrong. Offline results include no treatment advice, so confirm them with a local agricultural expert.
 
 ---
 
@@ -92,6 +117,7 @@ SmartAgro doesn't have its own database of weather, prices, or crop diseases —
 | **Open-Meteo Geocoding** | Turns a typed city name into lat/lon for the chatbot | No (free, keyless) | — |
 | **Groq** | Primary chatbot model, primary crop-disease vision model, voice transcription (Whisper) | Yes (free tier) | `GROQ_API_KEY` |
 | **Google Gemini** | Fallback chat model, independent second vision model for diagnosis cross-checking, translation | Yes (free tier), optional | `GEMINI_API_KEY` |
+| **Google Gemma** | Additional crop-disease diagnosis attempt before the local model | Yes (Google AI API key) | `GEMMA_API_KEY` |
 | **data.gov.in / Agmarknet** | Official government mandi (market) price data | Yes (free), falls back to a shared rate-limited public test key if unset | `DATA_GOV_API_KEY` |
 | **Earth Search STAC (AWS)** | Sentinel-2 satellite imagery for NDVI/vegetation health | No (free, keyless) | — |
 
@@ -132,6 +158,8 @@ Fill in your own keys in `.env` (see the table above and the comments in `.env.e
 ```bash
 python app.py
 ```
+
+At startup, the terminal lists which integrations have keys or local files configured. This is a configuration check, not a live API test. During diagnosis, the terminal prints an ordered step-by-step trace: the Groq plant-image check and its true/false result (when configured), the provider and exact model called at each diagnosis attempt, skipped or failed providers, and the provider/model that returned the answer. API keys are not printed. Copy `.env.example` to `.env` and add your keys to enable hosted features.
 
 Or with Gunicorn (closer to production):
 

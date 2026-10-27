@@ -23,8 +23,9 @@ except Exception as _e:
 # ── Import Shared Config & Services ─────────────────────────────────────────
 from shared import (
     basedir, logger, BUILD_VERSION, DEBUG_MODE, ADMIN_SECRET_KEY,
-    OPENWEATHER_API_KEY, GROQ_API_KEY, GEMINI_DIAGNOSE_KEY,
-    GEMINI_TRANSLATE_KEY, _RASTERIO_AVAILABLE, is_admin_authorized,
+    OPENWEATHER_API_KEY, GROQ_API_KEY, GEMINI_DIAGNOSE_KEY, GEMMA_DIAGNOSE_KEY,
+    GEMINI_TRANSLATE_KEY, VISUALCROSSING_API_KEY, DATA_GOV_API_KEY,
+    _RASTERIO_AVAILABLE, is_admin_authorized,
     _USAGE_FEATURE_LABELS, load_usage_stats, save_usage_stats,
     flush_usage_stats, track_usage, _usage_lock
 )
@@ -37,6 +38,7 @@ from routes import (
     chat_bp,
     alerts_bp,
 )
+from offline_diagnosis import MODEL_FILES as OFFLINE_MODEL_FILES
 
 # ── Flask Application Factory & Configuration ───────────────────────────────
 app = Flask(__name__)
@@ -77,7 +79,7 @@ def _request_start():
     g.request_id = uuid.uuid4().hex[:10]
 
     # Usage tracking
-    if request.path.startswith(("/static/", "/healthz", "/readyz")) or request.path == "/favicon.ico":
+    if request.path.startswith(("/static/", "/translations/", "/healthz", "/readyz")) or request.path == "/favicon.ico":
         return
     ep = request.endpoint
     if not ep:
@@ -98,6 +100,8 @@ def _request_end(response):
                 g.get("request_id", "-"))
     if request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+    elif request.path.startswith("/translations/"):
+        response.headers["Cache-Control"] = "public, max-age=3600"
     return response
 
 # ── Error Handlers ──────────────────────────────────────────────────────────
@@ -195,9 +199,40 @@ def readyz():
         "groq":             bool(GROQ_API_KEY),
         "openweather":      bool(OPENWEATHER_API_KEY),
         "gemini_diagnose":  bool(GEMINI_DIAGNOSE_KEY),
+        "gemma_diagnose":   bool(GEMMA_DIAGNOSE_KEY),
         "gemini_translate": bool(GEMINI_TRANSLATE_KEY),
         "ndvi":             _RASTERIO_AVAILABLE,
     }), 200
+
+
+def log_local_startup_status():
+    def configured(name, available):
+        state = "READY: configured" if available else "NOT READY: key not set"
+        logger.info("  %s: %s", name, state)
+
+    offline_ready = all(path.is_file() for path in OFFLINE_MODEL_FILES)
+    offline_state = (
+        "READY: model files found (checksums are verified on first use)"
+        if offline_ready else
+        "NOT READY: model files missing; run scripts/download_offline_diagnosis_model.py"
+    )
+
+    logger.info("SmartAgro startup check (configuration only; external APIs are not being pinged):")
+    logger.info("  Web app: READY")
+    logger.info("  Weather: current weather %s; forecast %s",
+                "configured" if OPENWEATHER_API_KEY else "key not set",
+                "configured" if VISUALCROSSING_API_KEY else "key not set")
+    logger.info("  Crop diagnosis providers, in order:")
+    configured("Gemini", GEMINI_DIAGNOSE_KEY)
+    configured("Groq", GROQ_API_KEY)
+    configured("Gemma", GEMMA_DIAGNOSE_KEY)
+    logger.info("  Offline crop model: %s", offline_state)
+    configured("Translation with Gemini", GEMINI_TRANSLATE_KEY)
+    logger.info("  Satellite crop health: %s",
+                "READY: library installed" if _RASTERIO_AVAILABLE else "NOT READY: rasterio is not installed")
+    logger.info("  Market prices: %s",
+                "government API key configured" if DATA_GOV_API_KEY else "shared public key fallback will be used")
+
 
 # ── PWA Service Worker ──────────────────────────────────────────────────────
 @app.route("/service-worker.js")
@@ -209,4 +244,6 @@ def service_worker():
 
 # ── Application Runner ──────────────────────────────────────────────────────
 if __name__ == "__main__":
+    if not DEBUG_MODE or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        log_local_startup_status()
     app.run(host="0.0.0.0", port=7860, debug=DEBUG_MODE)

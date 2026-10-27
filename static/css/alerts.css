@@ -749,10 +749,11 @@
 }
 
 @media (max-width: 600px) {
+  .notif-btn-top-right { max-width: calc(100vw - 28px); white-space: normal; text-align: center; }
   .alert-summary-bar { gap: 10px; }
   .summary-card { flex: calc(50% - 5px); min-width: 0; }   /* 2-column grid */
   .alert-filters { gap: 6px; padding: 12px; }
-  .alert-tab { padding: 6px 10px; font-size: 0.72rem; }
+  .alert-tab { padding: 6px 10px; font-size: 0.72rem; white-space: normal; }
   .alert-card { flex-direction: column; gap: 12px; padding: 16px; }
   .alert-card-icon { width: 40px; height: 40px; font-size: 1.2rem; }
   .risk-chart-layout { grid-template-columns: 1fr; }
@@ -762,9 +763,23 @@
   .day-tabs { gap: 6px; padding: 10px; }
   .day-tab { padding: 6px 10px; min-width: 56px; font-size: 0.72rem; }
   .crop-risk-grid { grid-template-columns: 1fr; }
-  .upcoming-risk-bar .btn-check-upcoming { font-size: 0.8rem; padding: 12px 20px; }
+  .upcoming-risk-bar .btn-check-upcoming {
+    font-size: 0.8rem;
+    padding: 12px 16px;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .quick-jump-bar { gap: 8px; }
-  .quick-jump-btn { font-size: 0.78rem; padding: 8px 14px; }
+  .quick-jump-btn {
+    flex: 1 1 150px;
+    min-width: 0;
+    font-size: 0.78rem;
+    padding: 8px 12px;
+    white-space: normal;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
   
   .monthly-calendar {
     grid-template-columns: repeat(2, 1fr);

@@ -99,7 +99,7 @@ function showAlertsOverlay(langCode) {
     }
     const name = ALERTS_LANG_NAMES[langCode] || langCode.toUpperCase();
     ov.innerHTML = `<div class="alerts-tx-box" style="position:relative">
-        <button onclick="document.getElementById('alertsTxOverlay').classList.remove('visible')" style="position:absolute;top:8px;right:10px;background:rgba(255,255,255,.1);border:none;color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .2s" onmouseover="this.style.background='rgba(248,113,113,.4)'" onmouseout="this.style.background='rgba(255,255,255,.1)'" title="Cancel">&times;</button>
+        <button class="translate-overlay-close" onclick="document.getElementById('alertsTxOverlay').classList.remove('visible')" title="Cancel">&times;</button>
         <div class="alerts-tx-spinner"></div>
         <div class="alerts-tx-title">Translating to ${name}<span class="alerts-tx-dots"><span>.</span><span>.</span><span>.</span></span></div>
         <div class="alerts-tx-sub">First-time translation can take a few seconds. It'll be instant after this.</div>
@@ -857,6 +857,7 @@ async function renderHarmfulSafeCrops(weather) {
     section.style.display = '';
 
     const temp = weather.temp;
+    const formatTemp = window.formatAppTemperature || (value => `${value}°C`);
     const humidity = weather.humidity;
     let harmful = [];
     let safe = [];
@@ -911,8 +912,8 @@ async function renderHarmfulSafeCrops(weather) {
 
             if (!tempOk || !humidityOk) {
                 const reasons = [];
-                if (temp < crop.minTemp) reasons.push(`Too cold (min ${crop.minTemp}°C needed)`);
-                if (temp > crop.maxTemp) reasons.push(`Too hot (max ${crop.maxTemp}°C tolerated)`);
+                if (temp < crop.minTemp) reasons.push(`Too cold (min ${formatTemp(crop.minTemp)} needed)`);
+                if (temp > crop.maxTemp) reasons.push(`Too hot (max ${formatTemp(crop.maxTemp)} tolerated)`);
                 if (humidity < crop.minHumidity) reasons.push(`Humidity too low (min ${crop.minHumidity}% needed)`);
                 harmful.push({ ...crop, reasons });
             } else {
@@ -945,7 +946,7 @@ async function renderHarmfulSafeCrops(weather) {
           <div class="hsc-reason" style="margin-top:6px">
             <div style="display:flex;align-items:center;gap:6px">
               <i class="fas fa-check-circle" style="color:var(--green)"></i>
-              <span style="font-size:0.78rem;color:var(--text-2)">${_at('Suitable for') || 'Suitable for'} ${temp}°C, ${humidity}% ${_at('humidity') || 'humidity'}</span>
+              <span style="font-size:0.78rem;color:var(--text-2)">${_at('Suitable for') || 'Suitable for'} ${formatTemp(temp)}, ${humidity}% ${_at('humidity') || 'humidity'}</span>
             </div>
             <div style="margin-top:6px;height:4px;background:var(--bg-2);border-radius:2px;overflow:hidden">
               <div style="height:100%;width:${c.suitability}%;background:linear-gradient(90deg,var(--green-dark),var(--green));border-radius:2px;transition:width 1s ease"></div>
@@ -955,6 +956,10 @@ async function renderHarmfulSafeCrops(weather) {
       .join('')
     : `<p style="color:var(--text-3);font-size:0.875rem">${_at('No fully safe crops identified — check crop calendar.') || 'No fully safe crops identified — check crop calendar.'}</p>`;
 }
+
+window.addEventListener('appTempUnitChanged', function() {
+    if (currentWeather) renderHarmfulSafeCrops(currentWeather);
+});
 
 /* ── Risk Chart ─────────────────────────────── */
 function renderRiskChart(weather, alerts) {

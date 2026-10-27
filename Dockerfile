@@ -14,6 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of your application code
 COPY . .
 
+RUN python scripts/download_offline_diagnosis_model.py
+
 # Expose the port Hugging Face expects (7860)
 EXPOSE 7860
 

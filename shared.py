@@ -54,6 +54,8 @@ GEMINI_DIAGNOSE_KEY  = os.getenv("GEMINI_API_KEY_DIAGNOSE", "") or os.getenv("GE
 GEMINI_TRANSLATE_KEY = os.getenv("GEMINI_API_KEY_TRANSLATE", "") or os.getenv("GEMINI_API_KEY", "")
 GEMINI_TRANSLATE_MODEL = os.getenv("GEMINI_TRANSLATE_MODEL", "gemini-3.5-flash")
 GEMINI_DIAGNOSIS_MODEL = os.getenv("GEMINI_DIAGNOSIS_MODEL", "gemini-3.6-flash")
+GEMMA_DIAGNOSE_KEY = os.getenv("GEMMA_API_KEY_DIAGNOSE", "") or os.getenv("GEMMA_API_KEY", "")
+GEMMA_DIAGNOSIS_MODEL = os.getenv("GEMMA_DIAGNOSIS_MODEL", "gemma-3-27b-it")
 NINJA_API_KEY       = os.getenv("NINJA_API_KEY", "")
 DATA_GOV_API_KEY    = os.getenv("DATA_GOV_API_KEY", "")
 DEBUG_MODE          = os.getenv("FLASK_DEBUG", "0") == "1"
@@ -64,7 +66,7 @@ LANG_NAMES = {
     "ta":"Tamil","gu":"Gujarati","kn":"Kannada","ml":"Malayalam","pa":"Punjabi",
     "or":"Odia","as":"Assamese","ur":"Urdu","mai":"Maithili","sat":"Santali",
     "ks":"Kashmiri","ne":"Nepali","sd":"Sindhi","kok":"Konkani","mni":"Manipuri",
-    "bodo":"Bodo","doi":"Dogri",
+    "bodo":"Bodo","doi":"Dogri","sa":"Sanskrit",
 }
 
 CITY_STATE = {
@@ -220,16 +222,18 @@ def _extract_json_object(raw_text):
 
 
 _SCRIPT_NOTES = {
-    "Devanagari script (देवनागरी)": ["hi", "mr", "mai", "ne", "sd", "doi", "sa", "kok"],
-    "Bengali script (বাংলা)": ["bn", "as", "mni"],
+    "Devanagari script (देवनागरी)": ["hi", "mr", "mai", "ne", "doi", "sa", "kok", "bodo"],
+    "Bengali script (বাংলা)": ["bn", "as"],
     "Gurmukhi script (ਗੁਰਮੁਖੀ)": ["pa"],
     "Telugu script (తెలుగు)": ["te"],
     "Tamil script (தமிழ்)": ["ta"],
     "Gujarati script (ગુજરાતી)": ["gu"],
     "Kannada script (ಕನ್ನಡ)": ["kn"],
     "Malayalam script (മലയാളം)": ["ml"],
-    "Urdu/Perso-Arabic script (اردو)": ["ur", "ks"],
+    "Urdu/Perso-Arabic script (اردو)": ["ur", "ks", "sd"],
     "Odia script (ଓଡ଼ିଆ)": ["or"],
+    "Ol Chiki script (ᱚᱞ ᱪᱤᱠᱤ)": ["sat"],
+    "Meitei Mayek script (ꯃꯩꯇꯩ ꯃꯌꯦꯛ)": ["mni"],
 }
 
 

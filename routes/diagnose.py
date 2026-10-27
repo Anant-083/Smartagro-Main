@@ -8,12 +8,15 @@ import difflib
 import threading
 import requests
 from datetime import datetime
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, send_from_directory
 
 from shared import (
     logger, GROQ_API_KEY, GEMINI_DIAGNOSE_KEY, GEMINI_DIAGNOSIS_MODEL,
+    GEMMA_DIAGNOSE_KEY, GEMMA_DIAGNOSIS_MODEL,
     DEBUG_MODE, basedir, LANG_NAMES, translate_terms
 )
+from diagnose_translation_terms import DIAGNOSE_UI_TERMS
+from offline_diagnosis import OfflineDiagnosisUnavailable, predict_offline_diagnosis
 
 diagnose_bp = Blueprint("diagnose", __name__)
 
@@ -38,7 +41,10 @@ GEMINI_QUOTA_SKIP_SEC = 90
 
 def ai_is_crop_image(image_b64):
     if not GROQ_API_KEY:
-        logger.info("[Diagnose] Plant check skipped: no Groq key")
+        logger.info(
+            "[Diagnosis step 1/5] Groq plant-image check: skipped "
+            "(GROQ_API_KEY is not configured); continuing without this check."
+        )
         return True, None
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -55,21 +61,50 @@ def ai_is_crop_image(image_b64):
         "response_format": {"type": "json_object"},
     }
     t0 = time.time()
-    logger.info(f"[Diagnose] Calling Groq for plant check model={vision_models[0]}")
+    logger.info(
+        "[Diagnosis step 1/5] Groq plant-image check: calling model=%s",
+        vision_models[0],
+    )
     try:
         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=8)
         ms = int((time.time() - t0) * 1000)
         if resp.status_code == 200:
             raw = resp.json()["choices"][0]["message"]["content"].strip()
-            parsed = json.loads(re.search(r"\{.*\}", raw, re.DOTALL).group())
-            logger.info(f"[Diagnose] Groq plant check OK is_plant={parsed.get('is_plant')} ({ms}ms)")
-            if parsed.get("is_plant") is False:
-                return False, parsed.get("reason") or "The photo doesn't appear to show a plant or crop."
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            parsed = json.loads(match.group()) if match else None
+            if isinstance(parsed, dict) and isinstance(parsed.get("is_plant"), bool):
+                is_plant = parsed["is_plant"]
+                logger.info(
+                    "[Diagnosis step 1/5] Groq plant-image check result: "
+                    "%s (model=%s, %sms)",
+                    "PLANT" if is_plant else "NOT A PLANT",
+                    vision_models[0],
+                    ms,
+                )
+                if not is_plant:
+                    return False, parsed.get("reason") or "The photo doesn't appear to show a plant or crop."
+                return True, None
+            logger.warning(
+                "[Diagnosis step 1/5] Groq plant-image check: model=%s returned "
+                "no valid true/false result (%sms); continuing without this check.",
+                vision_models[0],
+                ms,
+            )
         else:
-            logger.warning(f"[Diagnose] Groq plant check HTTP {resp.status_code} ({ms}ms), allowing image")
+            logger.warning(
+                "[Diagnosis step 1/5] Groq plant-image check: model=%s returned "
+                "HTTP %s (%sms); continuing without this check.",
+                vision_models[0],
+                resp.status_code,
+                ms,
+            )
         return True, None
     except Exception as e:
-        logger.warning(f"[Diagnose] Groq plant check error: {e}, allowing image")
+        logger.warning(
+            "[Diagnosis step 1/5] Groq plant-image check failed (%s); "
+            "continuing without this check.",
+            e,
+        )
         return True, None
 
 
@@ -181,6 +216,57 @@ def _run_gemini_pass(image_b64, prompt, sys_prompt):
     return None, None
 
 
+def _run_gemma_pass(image_b64, prompt, sys_prompt):
+    if not GEMMA_DIAGNOSE_KEY:
+        logger.info("[Diagnose] Gemma skipped: no key set")
+        return None
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMMA_DIAGNOSIS_MODEL}:generateContent"
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMMA_DIAGNOSE_KEY,
+    }
+    body = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}},
+                {"text": f"{sys_prompt}\n\n{prompt}"},
+            ],
+        }],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000},
+    }
+    started_at = time.time()
+    logger.info("[Diagnose] Calling Gemma model=%s", GEMMA_DIAGNOSIS_MODEL)
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=20)
+        elapsed_ms = int((time.time() - started_at) * 1000)
+        if response.status_code == 200:
+            candidates = response.json().get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                raw = "".join(
+                    part.get("text", "") for part in parts if isinstance(part, dict)
+                ).strip()
+                parsed = _repair_and_parse_json(raw)
+                if parsed and parsed.get("disease"):
+                    logger.info("[Diagnose] Gemma OK model=%s (%sms)", GEMMA_DIAGNOSIS_MODEL, elapsed_ms)
+                    return parsed
+            logger.warning("[Diagnose] Gemma returned no usable diagnosis (%sms)", elapsed_ms)
+        else:
+            logger.warning(
+                "[Diagnose] Gemma HTTP %s (%sms)",
+                response.status_code,
+                elapsed_ms,
+            )
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        logger.warning("[Diagnose] Gemma request failed: %s", exc)
+    return None
+
+
 def _diseases_agree(name_a, name_b):
     if not name_a or not name_b: return False
     a, b = name_a.strip().lower(), name_b.strip().lower()
@@ -212,9 +298,6 @@ def _log_diagnosis(record):
 
 @diagnose_bp.route("/api/diagnose", methods=["POST"])
 def diagnose_crop():
-    if not GROQ_API_KEY and not GEMINI_DIAGNOSE_KEY:
-        return jsonify({"error": "No vision API keys configured"}), 500
-
     data = request.json or {}
     image_b64 = data.get("image", "")
     lang      = str(data.get("lang", "en")).strip().lower()
@@ -232,37 +315,93 @@ def diagnose_crop():
         return jsonify({"not_a_crop_image": True, "error": reject_reason or "Please upload a photo of a crop/plant."}), 422
 
     lang_name = LANG_NAMES.get(lang, "")
-    lang_instruction = f"\n\nWrite ALL text values in {lang_name}." if lang != "en" and lang_name else ""
-    prompt = f"""You are an agricultural plant pathologist. Look at this crop image. Return valid JSON only: {{ "disease": "Exact disease name", "confidence": 88, "severity": "Mild|Moderate|Severe", "affected_part": "Leaves|Stem|Fruit|Root", "cause": "Pathogen and cause", "eco_remedies": [{{"remedy": "Name", "method": "Steps", "frequency": "Frequency", "effectiveness": 85}}], "chemical_remedies": [{{"name": "Chemical name", "dose": "Dose", "interval": "Interval"}}], "prevention": ["tip1", "tip2"], "recovery_timeline": "Estimated recovery time" }}{lang_instruction}"""
+    prompt = f"""You are an agricultural plant pathologist. Look at this crop image. Return valid JSON only with a diagnosis object using this schema: {{ "disease": "Exact disease name", "confidence": 88, "severity": "Mild|Moderate|Severe", "affected_part": "Leaves|Stem|Fruit|Root", "cause": "Pathogen and cause", "eco_remedies": [{{"remedy": "Name", "method": "Steps", "frequency": "Frequency", "effectiveness": 85}}], "chemical_remedies": [{{"name": "Chemical name", "dose": "Dose", "interval": "Interval"}}], "prevention": ["tip1", "tip2"], "recovery_timeline": "Estimated recovery time", "_english_source": {{ "disease": "English disease name", "confidence": 88, "severity": "English severity", "affected_part": "English plant part", "cause": "English cause", "eco_remedies": [{{"remedy": "English name", "method": "English steps", "frequency": "English frequency", "effectiveness": 85}}], "chemical_remedies": [{{"name": "English chemical name", "dose": "English dose", "interval": "English interval"}}], "prevention": ["English tip"], "recovery_timeline": "English recovery time" }} }}. Write all user-facing text in the diagnosis object in {lang_name or "English"}. The _english_source must describe the same diagnosis and contain all user-facing text in English. Numeric fields must match in both. Do not include analysis or other fields."""
     sys_prompt = "Expert plant pathologist. Return ONLY valid JSON."
 
     results, models_used = [], []
     if GEMINI_DIAGNOSE_KEY:
+        logger.info("[Diagnosis step 2/5] Gemini diagnosis: trying configured model(s).")
         res, used_model = _run_gemini_pass(image_b64, prompt, sys_prompt)
         if res and res.get("disease"):
             results.append(res)
             models_used.append(f"gemini:{used_model}")
-            logger.info(f"[Diagnose] RESULT from Gemini ({used_model})")
+            logger.info("[Diagnosis step 2/5] Gemini diagnosis succeeded: model=%s", used_model)
         else:
-            logger.warning("[Diagnose] Gemini gave no result, falling back to Groq")
+            logger.warning("[Diagnosis step 2/5] Gemini gave no diagnosis; continuing to Groq.")
+    else:
+        logger.info("[Diagnosis step 2/5] Gemini diagnosis: skipped (key not configured).")
 
-    if not results and GROQ_API_KEY:
+    if results:
+        logger.info("[Diagnosis step 3/5] Groq diagnosis: skipped (Gemini already answered).")
+    elif GROQ_API_KEY:
+        logger.info(
+            "[Diagnosis step 3/5] Groq diagnosis: trying model=%s.",
+            vision_models[0],
+        )
         res = _run_vision_pass(image_b64, prompt, sys_prompt, vision_models[0], 0.2)
         if res and res.get("disease"):
             results.append(res)
             models_used.append(f"groq:{vision_models[0]}")
-            logger.info(f"[Diagnose] RESULT from Groq ({vision_models[0]})")
+            logger.info("[Diagnosis step 3/5] Groq diagnosis succeeded: model=%s", vision_models[0])
         else:
-            logger.warning("[Diagnose] Groq diagnosis also failed")
+            logger.warning("[Diagnosis step 3/5] Groq gave no diagnosis; continuing to Gemma.")
+    else:
+        logger.info("[Diagnosis step 3/5] Groq diagnosis: skipped (key not configured).")
 
-    if not results:
-        logger.error("[Diagnose] BOTH providers failed, returning 500")
-        return jsonify({"error": "Vision models unavailable right now."}), 500
+    if results:
+        logger.info("[Diagnosis step 4/5] Gemma diagnosis: skipped (an earlier provider answered).")
+    elif GEMMA_DIAGNOSE_KEY:
+        logger.info(
+            "[Diagnosis step 4/5] Gemma diagnosis: trying model=%s.",
+            GEMMA_DIAGNOSIS_MODEL,
+        )
+        res = _run_gemma_pass(image_b64, prompt, sys_prompt)
+        if res and res.get("disease"):
+            results.append(res)
+            models_used.append(f"gemma:{GEMMA_DIAGNOSIS_MODEL}")
+            logger.info(
+                "[Diagnosis step 4/5] Gemma diagnosis succeeded: model=%s",
+                GEMMA_DIAGNOSIS_MODEL,
+            )
+        else:
+            logger.warning("[Diagnosis step 4/5] Gemma gave no diagnosis; continuing to offline model.")
+    else:
+        logger.info("[Diagnosis step 4/5] Gemma diagnosis: skipped (key not configured).")
 
-    primary = max(results, key=lambda r: r.get("confidence", 0))
-    primary["_lang"] = lang
-    primary["model_agreement"] = True
-    primary["_passes_run"] = len(results)
+    used_offline_fallback = not results
+    if used_offline_fallback:
+        logger.warning(
+            "[Diagnosis step 5/5] Hosted providers gave no diagnosis; "
+            "trying offline model=plantvillage-15-class."
+        )
+        try:
+            primary = predict_offline_diagnosis(image_b64)
+        except OfflineDiagnosisUnavailable as exc:
+            logger.error(
+                "[Diagnosis step 5/5] Offline model=plantvillage-15-class "
+                "failed: %s",
+                exc,
+            )
+            return jsonify({
+                "error": "Vision models are unavailable and the local fallback could not process this image."
+            }), 503
+        models_used.append("offline:plantvillage-15-class")
+        logger.info("[Diagnosis step 5/5] Offline model=plantvillage-15-class completed.")
+    else:
+        logger.info("[Diagnosis step 5/5] Offline model: skipped (hosted provider already answered).")
+        primary = max(results, key=lambda r: r.get("confidence", 0))
+
+    answer_source = models_used[0] if models_used else "unknown"
+    logger.info(
+        "[Diagnosis result] Answered by %s | disease=%s | confidence=%s%%",
+        answer_source,
+        primary.get("disease", "unknown"),
+        primary.get("confidence", "unknown"),
+    )
+
+    primary["_lang"] = "en" if used_offline_fallback else lang
+    primary["model_agreement"] = not used_offline_fallback
+    primary["_passes_run"] = 0 if used_offline_fallback else len(results)
     primary["_models_used"] = models_used
 
     record_id = f"{int(time.time()*1000)}"
@@ -307,7 +446,11 @@ def diagnose_log_review():
 def diagnose_log_accuracy():
     if not DEBUG_MODE:
         return jsonify({"error": "Debug mode only"}), 403
-    return jsonify({"accuracy": 92.5})
+    return jsonify({
+        "accuracy": None,
+        "status": "not_measured",
+        "message": "No labeled evaluation dataset has been measured by SmartAgro.",
+    })
 
 
 _diagnose_translation_cache = {}
@@ -321,43 +464,35 @@ def translate_diagnose():
         return jsonify({"lang": "en", "translations": {}, "cached": False})
 
     lang_name = LANG_NAMES.get(lang, "Hindi")
-    terms = [
-        "Drop your crop image here", "Supports JPG, PNG, WEBP — max 10 MB",
-        "Upload Photo", "Take Photo", "Image ready for analysis",
-        "Remove image", "Close camera", "Capture photo", "Analyze Crop",
-        "Analyzing…", "Try Again", "Photo Tips for Best Results",
-        "Focus on the most visibly affected area", "Use natural daylight — avoid harsh shadows",
-        "Include both healthy and affected parts if possible",
-        "Keep the camera steady and close (30–50 cm)",
-        "Upload a crop image to begin diagnosis",
-        "Our AI will identify the disease and suggest eco-friendly treatments",
-        "Upload or capture image", "Click Analyze Crop", "Get instant AI diagnosis",
-        "AI is analyzing your crop…", "Identifying disease patterns and preparing remedies",
-        "Scanning image…", "Detecting patterns…", "Finding remedies…",
-        "Cause", "Recovery Timeline", "Eco-Friendly Remedies", "RECOMMENDED",
-        "Remedy Effectiveness Chart", "Chemical Treatment Options",
-        "Prevention Tips", "Confidence", "Severity", "effectiveness",
-        "AI-generated diagnosis for guidance only. Consult a local agronomist for critical crop decisions.",
-        "Unknown Disease", "Analysis Failed", "Could not process the image.",
-        "Make sure your API key is set and the image is clear.",
-        "Diagnosis failed. Please try again.",
-        "Please upload or capture a crop image first.",
-        "Please drop a valid image file (JPG, PNG, WEBP).",
-        "Image too large. Max 10 MB allowed.",
-        "Camera access denied or not available.",
-        "Camera ready — position your crop in frame.",
-        "Diagnosis complete!", "Mild", "Moderate", "Severe",
-        "How It Works", "Capture or Upload",
-        "Take a clear photo of the affected crop leaf, stem, or fruit",
-        "AI Analysis",
-        "Our AI model analyzes visual patterns to identify diseases with high accuracy",
-        "Get Remedies",
-        "Receive eco-friendly and chemical treatment plans with dosage details instantly",
-    ]
-
     domain_note = "UI copy and section labels for crop disease diagnosis. Keep simple for farmers."
-    translations, cached = translate_terms(terms, lang_name, domain_note, lang, _diagnose_translation_cache, lang_code=lang)
-    return jsonify({"lang": lang, "lang_name": lang_name, "translations": translations, "cached": cached})
+    translations, _ = translate_terms(DIAGNOSE_UI_TERMS, lang_name, domain_note, lang, _diagnose_translation_cache, lang_code=lang)
+    complete = lang in _diagnose_translation_cache
+    return jsonify({"lang": lang, "lang_name": lang_name, "translations": translations, "cached": complete})
+
+
+@diagnose_bp.route("/translations/<lang>.json")
+def diagnose_translation_file(lang):
+    lang = lang.lower()
+    if lang not in LANG_NAMES or lang == "en":
+        return jsonify({"error": "Translation file not found"}), 404
+
+    path = os.path.join(basedir, "translations", f"{lang}.json")
+    if not os.path.isfile(path):
+        return jsonify({"error": "Translation file not found"}), 404
+
+    response = send_from_directory(os.path.join(basedir, "translations"), f"{lang}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            saved_terms = json.load(file)
+        complete = isinstance(saved_terms, dict) and all(
+            isinstance(saved_terms.get(term), str) and saved_terms[term]
+            for term in DIAGNOSE_UI_TERMS
+        )
+    except (OSError, json.JSONDecodeError):
+        logger.warning("[DiagnoseTranslate] Could not verify translation completeness for %s", lang)
+        complete = False
+    response.headers["X-Diagnose-Translations-Complete"] = "true" if complete else "false"
+    return response
 
 
 _diagnosis_result_cache = {}
@@ -374,14 +509,17 @@ def translate_diagnosis_result():
     lang_name = LANG_NAMES.get(lang, "Hindi")
     terms = []
     def add(val):
-        if isinstance(val, str) and val.strip() and val not in terms:
-            terms.append(val.strip())
+        if isinstance(val, str) and val.strip():
+            normalized = val.strip()
+            if normalized not in terms:
+                terms.append(normalized)
 
     add(result.get("disease"))
     add(result.get("severity"))
     add(result.get("affected_part"))
     add(result.get("cause"))
     add(result.get("recovery_timeline"))
+    add(result.get("offline_notice"))
     for r in result.get("eco_remedies") or []:
         add(r.get("remedy")); add(r.get("method")); add(r.get("frequency"))
     for c in result.get("chemical_remedies") or []:
@@ -393,6 +531,9 @@ def translate_diagnosis_result():
         return jsonify({"lang": lang, "translations": {}})
 
     domain_note = "AI-generated crop disease diagnosis for a farmer. Translate naturally. Keep chemical/brand names, numbers, and units unchanged."
-    cache_key = lang + "::" + "|".join(terms)
-    translations, cached = translate_terms(terms, lang_name, domain_note, cache_key, _diagnosis_result_cache, lang_code=lang)
-    return jsonify({"lang": lang, "lang_name": lang_name, "translations": translations, "cached": cached})
+    result_payload = json.dumps(terms, ensure_ascii=False, separators=(",", ":"))
+    result_hash = hashlib.sha256(result_payload.encode("utf-8")).hexdigest()
+    cache_key = f"{lang}::{result_hash}"
+    translations, _ = translate_terms(terms, lang_name, domain_note, cache_key, _diagnosis_result_cache, lang_code=lang)
+    complete = cache_key in _diagnosis_result_cache
+    return jsonify({"lang": lang, "lang_name": lang_name, "translations": translations, "cached": complete})

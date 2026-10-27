@@ -53,6 +53,18 @@
 .price-ticker:hover .ticker-content {
   animation-play-state: paused;
 }
+body.light-theme .price-ticker {
+  background: rgba(255,255,255,0.96);
+  border-top-color: var(--border-2);
+  box-shadow: 0 -4px 16px rgba(20,83,45,0.08);
+}
+body.light-theme .ticker-label {
+  background: var(--green-dark);
+  color: #ffffff;
+}
+body.light-theme .ticker-content {
+  color: var(--text-2);
+}
 @keyframes tickerScroll {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
@@ -611,21 +623,18 @@
   }
 
   .search-bar-section { padding: 12px 0; top: var(--nav-h); }
-  .search-box { padding: 6px 10px; gap: 6px; }
-  .search-box input { font-size: 0.85rem; }
-  .search-btn { padding: 7px 12px; font-size: 0.78rem; white-space: nowrap; }
+  .search-box { padding: 6px 10px; gap: 6px; min-width: 0; width: 100%; }
+  .search-box input { font-size: 0.85rem; min-width: 0; }
+  .search-btn { padding: 7px 10px; font-size: 0.78rem; white-space: normal; flex-shrink: 0; }
   
   .filter-chips {
     display: flex;
     gap: 8px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
+    overflow: visible;
+    flex-wrap: wrap;
     padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
   }
-  .filter-chips::-webkit-scrollbar { display: none; }
-  .chip { flex-shrink: 0; white-space: nowrap; }
+  .chip { flex: 0 1 auto; white-space: normal; text-align: center; overflow-wrap: anywhere; }
 
   .legend-bar { gap: 8px 12px; }
   .legend-item { font-size: 0.72rem; }
@@ -644,13 +653,17 @@
     gap: 8px;
     width: 100%;
     margin-top: 12px;
+    flex-wrap: wrap;
   }
   .quick-jump-btn {
-    flex: 1;
+    flex: 1 1 150px;
+    min-width: 0;
     justify-content: center;
     padding: 8px 10px;
     font-size: 0.76rem;
-    white-space: nowrap;
+    white-space: normal;
+    text-align: center;
+    overflow-wrap: anywhere;
   }
 }
 

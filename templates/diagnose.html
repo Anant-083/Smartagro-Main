@@ -32,10 +32,10 @@
     <a href="/alerts" class="nav-item" data-translate="nav_alerts"><i class="fas fa-bell"></i><span data-translate="nav_alerts">Alerts</span></a>
   </div>
   <div class="nav-actions">
-    <button class="settings-btn" id="settingsBtn" title="App Settings" aria-label="Open Settings">
+    <button class="settings-btn" id="settingsBtn" title="App Settings" data-translate-title="diagnose_settings_title" aria-label="Open Settings" data-translate-aria-label="diagnose_open_settings">
       <i class="fas fa-gear"></i>
     </button>
-    <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme">
+    <button class="theme-toggle" id="themeToggle" title="Toggle day/night theme" data-translate-title="theme_toggle_title">
     <i class="fas fa-moon" id="themeIcon"></i>
     </button>
     <div class="lang-selector" id="langSelector">
@@ -46,7 +46,7 @@
       </div>
     </div>
     <div class="user-profile-badge" id="userProfileBadge"></div>
-    <button class="install-btn" id="installBtn" title="Install SmartAgro App">
+    <button class="install-btn" id="installBtn" title="Install SmartAgro App" data-translate-title="diagnose_install_title">
       <i class="fas fa-download"></i><span data-translate="btn_install">Install App</span>
     </button>
     <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
@@ -60,7 +60,7 @@
     <div class="hero-orb orb-2"></div>
   </div>
   <div class="page-hero-content">
-    <div class="hero-badge"><i class="fas fa-microscope"></i> AI Crop Diagnosis</div>
+    <div class="hero-badge"><i class="fas fa-microscope"></i> <span data-translate="diagnose_badge">AI Crop Diagnosis</span></div>
     <h1><span class="gradient-text" data-translate="diagnose_title">Crop Disease Detector</span></h1>
     <p data-translate="diagnose_subtitle">Upload or capture a photo of your affected crop for instant AI-powered diagnosis and eco-friendly remedy suggestions</p>
   </div>
@@ -99,7 +99,7 @@
         <div class="image-preview" id="imagePreview" style="display:none">
           <img id="previewImg" alt="Crop preview"/>
           <div class="preview-overlay">
-            <button class="btn-icon" onclick="clearImage()" title="Remove image">
+            <button class="btn-icon" onclick="clearImage()" title="Remove image" data-translate-title="diagnose_remove_image">
               <i class="fas fa-trash"></i>
             </button>
           </div>
@@ -114,10 +114,10 @@
           <div class="camera-wrapper">
             <video id="cameraFeed" autoplay playsinline></video>
             <div class="camera-controls">
-              <button class="btn-icon close-cam-btn" onclick="closeCamera()" title="Close camera">
+              <button class="btn-icon close-cam-btn" onclick="closeCamera()" title="Close camera" data-translate-title="diagnose_close_camera">
                 <i class="fas fa-times"></i>
               </button>
-              <button class="btn-capture" onclick="capturePhoto()" title="Capture photo">
+              <button class="btn-capture" onclick="capturePhoto()" title="Capture photo" data-translate-title="diagnose_capture_photo">
                 <i class="fas fa-circle"></i>
               </button>
             </div>
@@ -147,10 +147,10 @@
           <div class="history-box-header">
             <div class="history-box-title">
               <i class="fas fa-history"></i>
-              <span>History</span>
+              <span data-translate="history_title">History</span>
               <span class="history-count-badge" id="historyCountBadge">0</span>
             </div>
-            <button type="button" class="history-clear-btn" onclick="clearDiagnoseHistory()" title="Clear History" aria-label="Clear History">
+            <button type="button" class="history-clear-btn" onclick="clearDiagnoseHistory()" title="Clear History" data-translate-title="history_clear" aria-label="Clear History" data-translate-aria-label="history_clear">
               <i class="fas fa-trash-can"></i>
             </button>
           </div>
@@ -209,7 +209,7 @@
 
 <footer class="footer">
   <div class="disclaimer-container">
-    <p><small><strong>⚠️ Disclaimer:</strong> SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.</small></p>
+    <p><small><strong data-translate="disclaimer_label">⚠️ Disclaimer:</strong> <span data-translate="disclaimer_text">SmartAgro gives general information only --- not a fully dependent diagnosis and recommendation.</span></small></p>
   </div>
   <div class="container">
     <div class="footer-brand">
@@ -231,6 +231,7 @@
 
 <script src="/static/js/translations.js?v={{ build_version }}" defer></script>
 <script src="/static/js/translations-extra.js?v={{ build_version }}" defer></script>
+<script src="/static/js/translations-generated.js?v={{ build_version }}" defer></script>
 <script src="/static/js/main.js?v={{ build_version }}" defer></script>
 <script src="/static/js/diagnose.js?v={{ build_version }}" defer></script>
 <script src="/static/js/kisan-helper.js?v={{ build_version }}" defer></script>

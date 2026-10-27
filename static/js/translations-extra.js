@@ -12,8 +12,7 @@
     if (typeof T === 'undefined') return;   // translations.js not loaded yet
     var EN = T.en;
 
-    // The language picker offers 13 languages, not 23.
-    EN.kw_lang_subtitle = 'Ask Kisan Helper in any of 13 languages';
+    EN.kw_lang_subtitle = 'Ask Kisan Helper in any of 23 languages';
 
     window.mergeTranslations = function (extra) {
         Object.keys(extra).forEach(function (lang) {
@@ -38,7 +37,7 @@
             kw_session_only: 'केवल इस सत्र के लिए • बंद करने पर मिट जाएगा',
             kw_clear_all: 'सब मिटाएं',
             kw_back: 'वापस',
-            kw_lang_subtitle: 'किसान हेल्पर से 13 भाषाओं में से किसी में भी पूछें',
+            kw_lang_subtitle: 'किसान हेल्पर से 23 भाषाओं में से किसी में भी पूछें',
             kw_lang_search_placeholder: 'भाषा खोजें (जैसे Hindi, English, বাংলা, తెలుగు)...',
             kw_voice: 'आवाज़',
             kw_type_or_speak: 'लिखें या बोलें...',
@@ -98,7 +97,7 @@
             kw_session_only: 'শুধু এই সেশনের জন্য • বন্ধ করলে মুছে যাবে',
             kw_clear_all: 'সব মুছুন',
             kw_back: 'ফিরে যান',
-            kw_lang_subtitle: 'কিষান হেল্পারকে ১৩টি ভাষার যেকোনোটিতে জিজ্ঞাসা করুন',
+            kw_lang_subtitle: 'কিষান হেল্পারকে ২৩টি ভাষার যেকোনোটিতে জিজ্ঞাসা করুন',
             kw_lang_search_placeholder: 'ভাষা খুঁজুন (যেমন Hindi, English, বাংলা, తెలుగు)...',
             kw_voice: 'ভয়েস',
             kw_type_or_speak: 'লিখুন বা বলুন...',

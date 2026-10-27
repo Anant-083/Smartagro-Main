@@ -12,6 +12,16 @@ const LANGUAGES = [
     { code: 'or', name: 'ଓଡ଼ିଆ (Odia)', flag: '🇮🇳', label: 'OR' },
     { code: 'as', name: 'অসমীয়া (Assamese)', flag: '🇮🇳', label: 'AS' },
     { code: 'ur', name: 'اردو (Urdu)', flag: '🇮🇳', label: 'UR' },
+    { code: 'mai', name: 'मैथिली (Maithili)', flag: '🇮🇳', label: 'MAI' },
+    { code: 'sat', name: 'ᱥᱟᱱᱛᱟᱲᱤ (Santali)', flag: '🇮🇳', label: 'SAT' },
+    { code: 'ks', name: 'کٲشُر (Kashmiri)', flag: '🇮🇳', label: 'KS' },
+    { code: 'ne', name: 'नेपाली (Nepali)', flag: '🇮🇳', label: 'NE' },
+    { code: 'sd', name: 'سنڌي (Sindhi)', flag: '🇮🇳', label: 'SD' },
+    { code: 'kok', name: 'कोंकणी (Konkani)', flag: '🇮🇳', label: 'KOK' },
+    { code: 'mni', name: 'ꯃꯩꯇꯩꯂꯣꯟ (Manipuri)', flag: '🇮🇳', label: 'MNI' },
+    { code: 'bodo', name: 'बड़ो (Bodo)', flag: '🇮🇳', label: 'BODO' },
+    { code: 'doi', name: 'डोगरी (Dogri)', flag: '🇮🇳', label: 'DOI' },
+    { code: 'sa', name: 'संस्कृत (Sanskrit)', flag: '🇮🇳', label: 'SA' },
 ];
 
 /* ════════════════════════════════════════════════
@@ -74,9 +84,9 @@ const T = {
         nav_diagnose: 'Diagnose Crop',
         nav_market: 'Market Prices',
         nav_alerts: 'Alerts',
-        hero_badge: '🌿 AI-Powered Precision Agriculture',
-        hero_title: 'Smart Farming Intelligence',
-        hero_subtitle: 'Real-time crop advisory, disease detection & market insights powered by AI',
+        hero_badge: '🌿 AI-Powered Farm Advisory',
+        hero_title: 'Smart Farming Advisory Intelligence',
+        hero_subtitle: 'Actionable crop, weather, disease, and market guidance—powered by live data and AI.',
         btn_location: 'Get My Location',
         btn_diagnose: 'Diagnose Crop',
         section_weather: 'Current Weather Conditions',
@@ -102,7 +112,14 @@ const T = {
         quick_alerts_sub: 'Weather & pest warnings for your area',
         footer_text: 'Empowering farmers with AI-driven precision agriculture',
         diagnose_title: 'Crop Disease Detector',
+        diagnose_badge: 'AI Crop Diagnosis',
         diagnose_subtitle: 'Upload or capture a photo of your affected crop for instant AI-powered diagnosis',
+        diagnose_settings_title: 'App Settings',
+        diagnose_open_settings: 'Open Settings',
+        diagnose_install_title: 'Install SmartAgro App',
+        diagnose_remove_image: 'Remove image',
+        diagnose_close_camera: 'Close camera',
+        diagnose_capture_photo: 'Capture photo',
         upload_title: 'Drop your crop image here',
         upload_sub: 'Supports JPG, PNG, WEBP – max 10MB',
         btn_upload: 'Upload Photo',
@@ -111,6 +128,8 @@ const T = {
         results_placeholder: 'Upload a crop image to begin diagnosis',
         results_placeholder_sub: 'Our AI will identify the disease and suggest eco-friendly treatments',
         how_title: 'How It Works',
+        history_title: 'History',
+        history_clear: 'Clear History',
         step1_title: 'Capture or Upload',
         step1_desc: 'Take a clear photo of the affected crop leaf, stem, or fruit',
         step2_title: 'AI Analysis',
@@ -2221,7 +2240,10 @@ window.currentLang = currentLang; // ← ADD
 
 /** Translate a key, falling back to English */
 function translate(key) {
-    return (T[currentLang] && T[currentLang][key]) || T.en[key] || key;
+    const english = T.en[key] || key;
+    return (T[currentLang] && T[currentLang][key]) ||
+        (currentLang !== 'en' && window.diagnoseTx && window.diagnoseTx[english]) ||
+        english;
 }
 
 /** Shorthand used by dynamic JS files */
@@ -2262,6 +2284,9 @@ function applyTranslations() {
     document.querySelectorAll('[data-translate-title]').forEach(el => {
         el.title = translate(el.getAttribute('data-translate-title'));
     });
+    document.querySelectorAll('[data-translate-aria-label]').forEach(el => {
+        el.setAttribute('aria-label', translate(el.getAttribute('data-translate-aria-label')));
+    });
     document.documentElement.lang = currentLang;
 }
 
@@ -2283,7 +2308,10 @@ function setLanguage(code) {
 // Global instant translation helper — reads from pre-baked T object, zero network call
 window.tStatic = function(key, lang) {
     const l = lang || window.currentLang || 'en';
-    return (T[l] && T[l][key]) || (T['en'] && T['en'][key]) || key;
+    const english = (T['en'] && T['en'][key]) || key;
+    return (T[l] && T[l][key]) ||
+        (l !== 'en' && window.diagnoseTx && window.diagnoseTx[english]) ||
+        (T['en'] && T['en'][key]) || key;
 };
 
 function updateLangUI() {
@@ -2370,7 +2398,7 @@ function showTranslationTimerOverlay(langObj, onStartExecution) {
 
     ov.innerHTML = `
       <div class="tx-timer-card" style="position:relative">
-        <button onclick="document.getElementById('txTimerOverlay').classList.remove('visible')" style="position:absolute;top:10px;right:12px;background:rgba(255,255,255,.1);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .2s;z-index:1" onmouseover="this.style.background='rgba(248,113,113,.4)'" onmouseout="this.style.background='rgba(255,255,255,.1)'" title="Cancel translation">&times;</button>
+        <button class="translate-overlay-close" onclick="document.getElementById('txTimerOverlay').classList.remove('visible')" title="Cancel translation">&times;</button>
         <div class="tx-timer-header"><i class="fas fa-globe"></i> <span>Multilingual Translation</span></div>
         <div class="tx-timer-title">Translating to ${langName}</div>
         <div class="tx-timer-sub">Translating buttons, interface &amp; fetched API data</div>

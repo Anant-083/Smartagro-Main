@@ -162,7 +162,7 @@ function showMarketTranslateOverlay(langCode) {
     const name = MARKET_LANG_DISPLAY_NAMES[langCode] || langCode.toUpperCase();
     overlay.innerHTML = `
       <div class="market-translate-box" style="position:relative">
-        <button onclick="document.getElementById('marketTranslateOverlay').classList.remove('visible')" style="position:absolute;top:8px;right:10px;background:rgba(255,255,255,.1);border:none;color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background .2s" onmouseover="this.style.background='rgba(248,113,113,.4)'" onmouseout="this.style.background='rgba(255,255,255,.1)'" title="Cancel">&times;</button>
+        <button class="translate-overlay-close" onclick="document.getElementById('marketTranslateOverlay').classList.remove('visible')" title="Cancel">&times;</button>
         <div class="market-translate-spinner"></div>
         <div class="market-translate-title">Translating to ${name}<span class="market-translate-dots"><span>.</span><span>.</span><span>.</span></span></div>
         <div class="market-translate-sub">First-time translation can take a few seconds. It'll be instant after this.</div>
@@ -722,10 +722,10 @@ function buildTicker(markets) {
                 const crop = crops[cIdx];
                 const isUp  = crop.change >= 0;
                 const sign  = isUp ? '▲' : '▼';
-                const color = isUp ? '#4ade80' : '#f87171';
+                const color = isUp ? 'var(--green)' : 'var(--red)';
                 items.push(
                     `<span style="margin:0 20px;display:inline-flex;align-items:center;gap:6px">
-                        <strong style="color:#e8f5e9">${tCrop(crop.crop)}</strong>
+                        <strong style="color:var(--text)">${tCrop(crop.crop)}</strong>
                         <span style="color:var(--text-3)">(${city})</span>
                         <strong style="color:var(--amber)"> ${formatMarketPrice(crop.price)}/${getWeightUnitLabel()}</strong>
                         <span style="color:${color};font-size:0.7rem"> ${sign}${Math.abs(crop.change).toFixed(1)}%</span>

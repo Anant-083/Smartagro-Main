@@ -426,7 +426,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btn) {
             btn.addEventListener('click', () => {
                 const isLight = document.body.classList.contains('light-theme');
-                applyTheme(isLight ? 'dark' : 'light');
+                const mode = isLight ? 'dark' : 'light';
+                applyTheme(mode);
+                if (window.SmartAgroSettings) {
+                    window.SmartAgroSettings.set('theme', mode);
+                }
             });
         }
     })();
@@ -702,7 +706,7 @@ window.SmartAgroNotifications = {
             alertsToTrigger.push({
                 id: 'heat_' + Math.floor(now / TWELVE_HOURS),
                 title: `🔥 Extreme Heatwave Alert - ${city}`,
-                body: `High temperature of ${Math.round(temp)}°C recorded. Irrigate standing crops during early morning or evening.`
+                body: `High temperature of ${(window.formatAppTemperature || (value => `${Math.round(value)}°C`))(temp)} recorded. Irrigate standing crops during early morning or evening.`
             });
         }
 
@@ -711,7 +715,7 @@ window.SmartAgroNotifications = {
             alertsToTrigger.push({
                 id: 'frost_' + Math.floor(now / TWELVE_HOURS),
                 title: `❄️ Frost & Cold Wave Warning - ${city}`,
-                body: `Low temperature of ${Math.round(temp)}°C detected. Cover young crop saplings to prevent frost damage.`
+                body: `Low temperature of ${(window.formatAppTemperature || (value => `${Math.round(value)}°C`))(temp)} detected. Cover young crop saplings to prevent frost damage.`
             });
         }
 

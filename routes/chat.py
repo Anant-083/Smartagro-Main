@@ -42,15 +42,6 @@ def _chat_message_on_topic(text: str) -> bool:
         return False
     return True
 
-_OFF_TOPIC_REPLIES = {
-    "en": "I'm Kisan Helper — I can only help with farming, crops, weather, market prices, and government schemes. Ask me something about your farm!",
-    "hi": "मैं किसान हेल्पर हूं — मैं केवल खेती, फसल, मौसम, मंडी भाव और सरकारी योजनाओं में मदद कर सकता हूं। अपने खेत के बारे में कुछ पूछें!",
-    "pa": "ਮੈਂ ਕਿਸਾਨ ਹੈਲਪਰ ਹਾਂ — ਮੈਂ ਸਿਰਫ਼ ਖੇਤੀ, ਫਸਲਾਂ, ਮੌਸਮ, ਮੰਡੀ ਭਾਅ ਅਤੇ ਸਰਕਾਰੀ ਸਕੀਮਾਂ ਵਿੱਚ ਮਦਦ ਕਰ ਸਕਦਾ ਹਾਂ।",
-}
-
-def _off_topic_reply(lang: str) -> str:
-    return _OFF_TOPIC_REPLIES.get(lang, _OFF_TOPIC_REPLIES["en"])
-
 def _geocode_city(name):
     if not name:
         return None
@@ -168,22 +159,20 @@ def kisan_chat():
         return jsonify({"error": "No messages"}), 400
 
     lang_name = LANG_NAMES.get(lang, "English")
-    last_user_msg = ""
+    last_user_message = ""
     for m in reversed(messages):
         if m.get("role") == "user":
-            last_user_msg = (m.get("content") or "").lower()
+            last_user_message = m.get("content") or ""
             break
+    last_user_msg = last_user_message.lower()
 
     _RESTRICTED_CROP_TERMS = ("tobacco", "opium", "poppy", "cannabis", "hemp", "marijuana", "ganja")
-    if any(term in last_user_msg for term in _RESTRICTED_CROP_TERMS):
-        return jsonify({"reply": "This app focuses on common food and commercial crops and doesn't advise on licensed/controlled crops like tobacco, opium, or cannabis. I'd be happy to suggest a legal alternative food or cash crop for your area instead!"})
-
-    if not _chat_message_on_topic(last_user_msg):
-        return jsonify({"reply": _off_topic_reply(lang)})
+    restricted_crop_request = any(term in last_user_msg for term in _RESTRICTED_CROP_TERMS)
+    off_topic_request = not restricted_crop_request and not _chat_message_on_topic(last_user_msg)
 
     wx = data.get("weather_context") or {}
     location_block = ""
-    if wx:
+    if wx and not off_topic_request and not restricted_crop_request:
         city = wx.get("city") or wx.get("location") or ""
         temp = wx.get("temp") or ""
         humidity = wx.get("humidity", "")
@@ -194,10 +183,9 @@ def kisan_chat():
         if parts:
             location_block = "\n\nFARMER'S CURRENT LOCATION & WEATHER:\n" + "\n".join(parts)
 
-    named_city = _chat_detect_city(last_user_msg)
-    commodity = _chat_detect_commodity(last_user_msg)
-    market_notes = []
-    if named_city:
+    named_city = _chat_detect_city(last_user_message) if not off_topic_request and not restricted_crop_request else None
+    commodity = _chat_detect_commodity(last_user_message) if not off_topic_request and not restricted_crop_request else None
+    if named_city and not off_topic_request and not restricted_crop_request:
         state = CITY_STATE.get(named_city)
         if state:
             prices = fetch_agmarknet_prices(state)
@@ -207,9 +195,15 @@ def kisan_chat():
                     if filtered: prices = filtered
                 summary = "; ".join(f"{p['crop']}: ₹{p['price']}/quintal" for p in prices[:6])
                 location_block += f"\n\n[LIVE MANDI PRICES for {named_city} ({state})]: {summary}"
-                market_notes.append(f"💰 Live Mandi prices ({named_city}): {summary}")
 
-    system_prompt = f"""You are Kisan Helper, a friendly AI agricultural advisory assistant in the SmartAgro app. Answer strictly agricultural queries in {lang_name} using native script. Be concise, practical, and helpful (4 to 5 bullet points). Each bullet must start with • and end with a full stop. If asked to navigate the app, use Markdown links: [Dashboard](/), [Diagnose Crop](/diagnose), [Market Prices](/market), [Alerts](/alerts).{location_block}"""
+    language_rule = f"""LANGUAGE RULE: Use the app's selected language ({lang_name}) when the most recent user message is in English. When the message is clearly in a non-English language, reply in that language using its usual script, even if it differs from the app selection. For mixed-language messages, reply in the clearly dominant non-English language; if English is dominant, use the app's selected language. Recognize clearly identifiable romanized/transliterated non-English text too. If the message is too short or ambiguous to identify reliably (for example, only numbers), use {lang_name}. Do not announce or explain your language choice."""
+    scope_rule = """ If a request is outside agriculture, briefly explain that you can help with farming, crops, weather, market prices, and government schemes, then invite a farming-related question."""
+    if restricted_crop_request:
+        scope_rule = """ The latest request concerns a licensed or controlled crop. Politely refuse to provide cultivation or processing instructions, and offer help choosing a legal food or commercial crop instead."""
+    elif off_topic_request:
+        scope_rule += """ The latest request is outside farming; keep the redirect brief."""
+
+    system_prompt = f"""You are Kisan Helper, a friendly AI agricultural advisory assistant in the SmartAgro app. {language_rule} Answer agricultural queries concisely, practically, and helpfully (4 to 5 bullet points). Each bullet must start with • and end with a full stop. If asked to navigate the app, use Markdown links: [Dashboard](/), [Diagnose Crop](/diagnose), [Market Prices](/market), [Alerts](/alerts).{scope_rule}{location_block}"""
 
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -222,8 +216,6 @@ def kisan_chat():
         resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=25)
         if resp.status_code == 200:
             reply = _ensure_reply_punctuation(resp.json()["choices"][0]["message"]["content"].strip())
-            if market_notes:
-                reply += "\n\n" + "\n".join(market_notes)
             return jsonify({"reply": reply})
         else:
             return jsonify({"error": f"Groq HTTP {resp.status_code}"}), 500

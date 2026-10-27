@@ -458,6 +458,15 @@ body.light-theme #kisanInput::placeholder { color: #9ca3af; }
 body.light-theme .kw-mic-btn    { background: #f0fdf4; color: #374151; border-color: rgba(22,101,52,.2); }
 body.light-theme .kw-lang-opt   { background: #f0fdf4; color: #374151; border-color: rgba(22,101,52,.2); }
 body.light-theme .kw-lang-picker { background: #f9fafb; }
+body.light-theme .kw-lang-title { color: #12351f; }
+body.light-theme .kw-lang-subtitle { color: #456b50; opacity: 1; }
+body.light-theme .kw-lang-opt span:first-child { color: #183b23; }
+body.light-theme .kw-lang-opt .kl-sub { color: #4b6d54; opacity: 1; }
+body.light-theme #kisanLangSearch { background: #fff; color: #183b23; border-color: rgba(22,101,52,.2); }
+body.light-theme #kisanLangSearch::placeholder { color: #687b6a; }
+body.light-theme .kw-lang-skip { background: #e8f5e9; border-color: rgba(22,101,52,.28); color: #166534; }
+body.light-theme .kw-lang-skip:hover,
+body.light-theme .kw-lang-skip:active { background: #166534; border-color: #166534; color: #fff; }
 body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba(22,101,52,.6); }
 
 @media (max-width: 600px) {
@@ -481,6 +490,14 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
   .kw-icon-btn { width: 38px; height: 38px; font-size: .95rem; }
   .kw-mic-btn, .kw-send-btn { width: 46px; height: 46px; }
   .kw-speak-btn { width: 30px; height: 30px; }
+}
+@media (max-width: 400px) {
+  .kw-header { flex-wrap: wrap; padding: 10px 12px; row-gap: 8px; }
+  .kw-header-left { flex: 1 1 100%; min-width: 0; gap: 8px; }
+  .kw-header-left > div:last-child { min-width: 0; }
+  .kw-header > div:last-child { width: 100%; justify-content: flex-end; gap: 8px !important; }
+  .kw-name { font-size: .88rem; overflow-wrap: anywhere; }
+  .kw-sub { overflow-wrap: anywhere; }
 }
 @media (max-width: 360px) {
   .kw-lang-grid { grid-template-columns: repeat(2, 1fr); }
@@ -583,11 +600,34 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
   function getBestVoice(langCode) {
     const speechLang = VOICE_LANGS[langCode] || 'en-IN';
     const langPrefix = speechLang.split('-')[0];
-    let voice = availableVoices.find(v => v.lang === speechLang);
-    if (!voice) voice = availableVoices.find(v => v.lang.startsWith(langPrefix));
-    if (!voice && langCode !== 'en') voice = availableVoices.find(v => v.lang === 'en-IN');
-    if (!voice) voice = availableVoices.find(v => v.lang.startsWith('en'));
-    return voice || null;
+    const normalize = value => (value || '').toLowerCase();
+    return availableVoices.find(v => normalize(v.lang) === speechLang.toLowerCase()) ||
+      availableVoices.find(v => normalize(v.lang).split('-')[0] === langPrefix) ||
+      null;
+  }
+
+  function getSpeechLanguage(text, fallbackLang) {
+    const scriptMatches = [
+      { pattern: /[\u0B80-\u0BFF]/, languages: ['ta'] },
+      { pattern: /[\u0C00-\u0C7F]/, languages: ['te'] },
+      { pattern: /[\u0C80-\u0CFF]/, languages: ['kn'] },
+      { pattern: /[\u0D00-\u0D7F]/, languages: ['ml'] },
+      { pattern: /[\u0A80-\u0AFF]/, languages: ['gu'] },
+      { pattern: /[\u0B00-\u0B7F]/, languages: ['or'] },
+      { pattern: /[\u0A00-\u0A7F]/, languages: ['pa'] },
+      { pattern: /[\u1C50-\u1C7F]/, languages: ['sat'] },
+      { pattern: /[\uABC0-\uABFF]/, languages: ['mni'] },
+      { pattern: /[\u0980-\u09FF]/, languages: ['bn', 'as', 'mni'] },
+      { pattern: /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/, languages: ['ur', 'ks', 'sd'] },
+      { pattern: /[\u0900-\u097F]/, languages: ['hi', 'mr', 'mai', 'sat', 'ne', 'kok', 'bodo', 'doi', 'sa'] },
+    ];
+
+    for (const script of scriptMatches) {
+      if (script.pattern.test(text)) {
+        return script.languages.includes(fallbackLang) ? fallbackLang : script.languages[0];
+      }
+    }
+    return fallbackLang;
   }
 
   // Spoken "to" word for number ranges like "5-6", per language — used so
@@ -982,10 +1022,11 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
     if (activeTyper) activeTyper.finish();
 
     const rawText = div.dataset.text || '';
-    const lang    = getAppLang();
+    const lang    = getSpeechLanguage(rawText, getAppLang());
     const text    = cleanTextForSpeech(rawText, lang);
     if (!text || !window.speechSynthesis) return;
 
+    loadVoices();
     const voice      = getBestVoice(lang);
     const speechLang = VOICE_LANGS[lang] || 'en-IN';
 
@@ -993,10 +1034,14 @@ body.light-theme .kw-speak-btn  { border-color: rgba(22,101,52,.25); color: rgba
     utterance.lang   = speechLang;
     utterance.rate   = 0.88;
     utterance.pitch  = 1;
+    const volume = window.SmartAgroSettings
+      ? window.SmartAgroSettings.get('volume')
+      : (window.sagrAudioVolume === undefined ? 80 : window.sagrAudioVolume);
+    utterance.volume = Math.max(0, Math.min(1, Number(volume) / 100));
     if (voice) utterance.voice = voice;
 
-    if (!voice && lang !== 'en') {
-      showKisanToast(`No ${LANG_ROMAN[lang] || lang} voice on this device. Using available voice.`);
+    if (!voice) {
+      showKisanToast(`No ${LANG_ROMAN[lang] || lang} voice is installed. Add its speech voice in your device settings.`);
     }
 
     utterance.onstart = () => {

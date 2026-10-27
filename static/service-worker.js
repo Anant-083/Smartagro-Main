@@ -3,7 +3,7 @@
    Handles: offline cache, background sync
 ═══════════════════════════════════════ */
 
-const CACHE_NAME = 'smartagro-v1';
+const CACHE_NAME = 'smartagro-v2';
 const OFFLINE_URL = '/offline';
 
 // Files to cache for offline use
@@ -24,6 +24,8 @@ const STATIC_ASSETS = [
     '/static/js/market.js',
     '/static/js/alerts.js',
     '/static/js/translations.js',
+    '/static/js/translations-extra.js',
+    '/static/js/translations-generated.js',
     '/static/icons/icon-192.png',
     '/static/icons/icon-512.png',
     'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap',
