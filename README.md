@@ -1,5 +1,5 @@
 ---
-title: Smartagro
+title: SmartAgro
 emoji: 🌱
 colorFrom: green
 colorTo: blue
@@ -8,253 +8,215 @@ app_port: 7860
 pinned: false
 ---
 
-# 🌿 SmartAgro — AI-Powered Precision Agriculture Platform
-<div align="center">
+# SmartAgro
 
-# 🌾 SmartAgro
+SmartAgro is a multilingual agricultural advisory web app for Indian farmers. It combines weather and market data with crop risk guidance, AI-assisted crop diagnosis, satellite vegetation indicators, and a farming-focused chatbot.
 
-**AI-powered agricultural advisory for Indian farmers**
+**Core features**
 
-Weather-driven alerts · Crop disease diagnosis · Live mandi prices · Satellite vegetation health · Multilingual AI chatbot
+- Local weather, forecasts, and crop recommendations
+- Weather-based alerts, seasonal guidance, and crop risk calendars
+- Crop photo diagnosis with hosted AI providers and an optional offline model
+- Government mandi prices and saved price history
+- Satellite-derived vegetation health indicators when imagery and dependencies are available
+- Kisan Helper chat with Groq as the primary provider and Gemini as an optional fallback
+- Voice input, multilingual interface, and installable progressive web app support
 
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![Gunicorn](https://img.shields.io/badge/Gunicorn-21.2-499848?style=for-the-badge&logo=gunicorn&logoColor=white)](https://gunicorn.org/)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Hugging Face Spaces](https://img.shields.io/badge/HF%20Spaces-deploy-FFD21E?style=for-the-badge&logo=huggingface&logoColor=black)](https://huggingface.co/spaces)
+SmartAgro does not use a relational database. It calls external data providers and stores selected counters and market history in local JSON files. Some responses are cached in memory.
 
-[![Groq](https://img.shields.io/badge/Groq-AI-F55036?style=flat-square&logo=groq&logoColor=white)](https://groq.com/)
-[![Gemini](https://img.shields.io/badge/Gemini-Vision-8E75B2?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
-[![OpenWeatherMap](https://img.shields.io/badge/OpenWeatherMap-Live-EB6E4B?style=flat-square&logo=openweathermap&logoColor=white)](https://openweathermap.org/)
-[![Visual Crossing](https://img.shields.io/badge/Visual%20Crossing-Forecast-1E88E5?style=flat-square)](https://www.visualcrossing.com/)
-[![data.gov.in](https://img.shields.io/badge/data.gov.in-Agmarknet-FF9933?style=flat-square)](https://data.gov.in/)
-[![Sentinel--2](https://img.shields.io/badge/Sentinel--2-NDVI-0B3D91?style=flat-square)](https://earth-search.aws.element84.com/)
-[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?style=flat-square&logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
+## Requirements
 
-</div>
+- Python 3.11 for local development, as specified by `runtime.txt`
+- Docker for containerized deployment
+- API keys for the hosted features you want to enable
 
----
+The current Docker image uses Python 3.10. Local development uses the version in `runtime.txt`.
 
-**Live stack:** Flask + Gunicorn, no database — data is fetched live from government/weather/AI APIs and cached in-memory, with disk-backed history where it matters (market prices).
+## Quick start
 
----
+### 1. Get the code and install dependencies
 
-## Table of Contents
-
-- [Features](#-features)
-- [Tech Stack](#-tech-stack)
-- [External APIs Used](#-external-apis-used)
-- [Setup](#-setup)
-- [Deployment](#-deployment-hugging-face-spaces)
-- [Project Structure](#-project-structure)
-- [Key API Routes](#-key-api-routes)
-- [Notes on Data Integrity](#-notes-on-data-integrity)
-
----
-
-## ✨ Features
-
-| | |
-|---|---|
-| 🏠 **Dashboard** | Current weather, multi-day forecast, crop recommendations for the farmer's location. |
-| 🩺 **Diagnose Crop** (`/diagnose`) | Upload a crop photo for hosted AI diagnosis and remedy guidance. If Gemini, Groq, and Gemma are unavailable, a packaged local model can classify 15 tomato, potato, and bell-pepper leaf classes. |
-| 🚨 **Alerts** (`/alerts`) | Day-by-day weather-driven agricultural risk alerts, a monthly risk calendar, and general seasonal advisories. |
-| 💰 **Market Prices** (`/market`) | Live government mandi (wholesale market) prices for crops by state, sourced from the official Agmarknet dataset. Filtered to real crops only — livestock/poultry, ornamental flowers, and timber entries that appear in the raw government feed are excluded. |
-| 🛰️ **Vegetation Health (NDVI)** | Satellite-derived crop health index from Sentinel-2 imagery. |
-| 💬 **Kisan Helper Chatbot** | Multilingual AI assistant restricted to agriculture topics, with live weather/market data available to it as tools, voice input (speech-to-text), and full app navigation via chat. |
-| 🌐 **Language selector** | 23 choices: English and 22 Indian languages, including Sanskrit, Santali, and Manipuri. |
-| 📲 **PWA support** | Installable, works offline via a service worker with an offline fallback page. |
-| 📊 **Usage tracking** (`/usage`) | Dashboard of API call counts. |
-
-Diagnosis-page translations and a common crop-disease glossary are served from `translations/<language>.json`. To generate or resume them before deployment, set `GEMINI_API_KEY_TRANSLATE` (or `GEMINI_API_KEY`) or `GROQ_API_KEY`, then run:
-
-```bash
-python generate_diagnose_translations.py
-```
-
-Optionally pass language codes to generate only selected files, for example `python generate_diagnose_translations.py mai sa`. Progress is saved after each translated chunk, so rerunning resumes missing terms.
-
-The global app interface also has a resumable translation-fill helper. It uses the same translation keys, fills missing or English fallback strings for all 22 non-English languages, and writes a script that is loaded by the pages and precached for offline use:
-
-```bash
-python fill_missing_translations.py
-```
-
-You can optionally pass language codes such as `python fill_missing_translations.py kok doi`. Existing hand-written translations are preserved. Review translations with native speakers before presenting them.
-
-The diagnosis route tries Gemini, then Groq, then Google Gemma (`gemma-3-27b-it` by default), and uses a CPU ONNX fallback only if none returns a diagnosis. Configure the Gemma API key with `GEMMA_API_KEY` (or `GEMMA_API_KEY_DIAGNOSE`) and optionally change the model with `GEMMA_DIAGNOSIS_MODEL`. The pinned [MIT-licensed PlantVillage model](https://huggingface.co/imaflower/plantvillage-mobilenetv3) is downloaded and checksum-verified during Docker builds. For local development, download it once with:
-
-```bash
-python scripts/download_offline_diagnosis_model.py
-```
-
-The offline model only covers 15 leaf classes for tomato, potato, and bell pepper. Its model card reports 99.77% test accuracy, but SmartAgro has not independently validated that score or tested field-photo performance. The displayed score is not calibrated; predictions for other crops or field conditions may be wrong. Offline results include no treatment advice, so confirm them with a local agricultural expert.
-
----
-
-## 🧰 Tech Stack
-
-| Layer | Choice |
-|---|---|
-| Backend | Flask 3, Gunicorn (single worker, multi-threaded — see note below) |
-| Frontend | Server-rendered HTML templates + vanilla JS (no framework) |
-| Satellite/NDVI | `rasterio`, `numpy` over Sentinel-2 STAC data |
-| Deployment target | Hugging Face Spaces (Docker), port `7860` |
-| Python version | 3.11.9 (see `runtime.txt`); Docker image uses `python:3.10-slim` |
-
-> **Why a single Gunicorn worker?** The app's in-memory caches (translation cache, crop-AI cache, Agmarknet fetch cache, weather cache) are plain Python dicts. Multiple worker *processes* would each get their own copy, silently halving the cache hit rate and doubling calls to slow/rate-limited external APIs. A single worker with multiple threads shares memory and still gets real concurrency, since this app is I/O-bound (waiting on external APIs), not CPU-bound.
-
----
-
-## 🔌 External APIs Used
-
-SmartAgro doesn't have its own database of weather, prices, or crop diseases — it calls out to these live sources:
-
-| Provider | Powers | Key required? | Env var |
-|---|---|---|---|
-| **OpenWeatherMap** | Current conditions + ~5-6 day forecast | Yes (free tier) | `OPENWEATHER_API_KEY` |
-| **Visual Crossing** | Extended forecast (out to ~15 days total), feeds the Alerts monthly calendar | Yes (free tier) | `VISUALCROSSING_API_KEY` |
-| **Open-Meteo Geocoding** | Turns a typed city name into lat/lon for the chatbot | No (free, keyless) | — |
-| **Groq** | Primary chatbot model, primary crop-disease vision model, voice transcription (Whisper) | Yes (free tier) | `GROQ_API_KEY` |
-| **Google Gemini** | Fallback chat model, independent second vision model for diagnosis cross-checking, translation | Yes (free tier), optional | `GEMINI_API_KEY` |
-| **Google Gemma** | Additional crop-disease diagnosis attempt before the local model | Yes (Google AI API key) | `GEMMA_API_KEY` |
-| **data.gov.in / Agmarknet** | Official government mandi (market) price data | Yes (free), falls back to a shared rate-limited public test key if unset | `DATA_GOV_API_KEY` |
-| **Earth Search STAC (AWS)** | Sentinel-2 satellite imagery for NDVI/vegetation health | No (free, keyless) | — |
-
-See [`.env.example`](./.env.example) for sign-up links and setup notes for each.
-
----
-
-## 🚀 Setup
-
-### 1. Clone and install
-
-```bash
-git clone https://github.com/Anant-083/Smartagro-Main.git
-cd Smartagro-Main
+```powershell
+git clone https://github.com/Anant-083/SmartAgro-MAIN-2.git
+cd SmartAgro-MAIN-2
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-`rasterio` (used for NDVI) needs GDAL system libraries. On Debian/Ubuntu:
+On macOS or Linux, create and activate the environment with:
 
 ```bash
-sudo apt-get install -y libgdal-dev gdal-bin
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-(The Docker image already installs these — see `Dockerfile`.)
+### 2. Configure API keys
 
-### 2. Configure environment variables
+Create a local environment file:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+On macOS or Linux:
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in your own keys in `.env` (see the table above and the comments in `.env.example` for where to get each one for free). At minimum you need `GROQ_API_KEY` and `OPENWEATHER_API_KEY` for the app to be useful; the rest degrade gracefully but with reduced functionality if left unset.
+Edit `.env` and add keys for the services you want. Never commit real API keys or the `.env` file.
 
-**Never commit your real `.env` file** — it's already in `.gitignore`.
+| Environment variable | Used for | Required |
+|---|---|---|
+| `OPENWEATHER_API_KEY` | Current weather and forecast data | For live weather |
+| `VISUALCROSSING_API_KEY` | Extended forecast and alerts calendar | Optional |
+| `GROQ_API_KEY` | Primary chat provider, voice transcription, and crop diagnosis | Optional; recommended |
+| `GEMINI_API_KEY_CHAT` | Chat fallback when Groq is unavailable or fails | Optional |
+| `GEMINI_CHAT_MODEL` | Gemini chat model; defaults to `gemini-2.5-flash` | Optional |
+| `GEMINI_API_KEY_DIAGNOSE` | Gemini crop diagnosis | Optional |
+| `GEMINI_API_KEY_TRANSLATE` | Gemini translation helpers | Optional |
+| `GEMINI_API_KEY` | Shared fallback key for Gemini integrations without a dedicated key | Optional |
+| `GEMMA_API_KEY_DIAGNOSE` | Additional hosted crop diagnosis provider | Optional |
+| `DATA_GOV_API_KEY` | Official Agmarknet market data | Optional |
+| `ADMIN_SECRET_KEY` | Protects usage and diagnosis review tools | Recommended for deployments |
 
-### 3. Run locally
+Dedicated Gemini keys take precedence over `GEMINI_API_KEY`. For example, chat uses `GEMINI_API_KEY_CHAT` when set and otherwise can use the shared Gemini key.
 
-```bash
+The app can start with missing optional keys, but the corresponding live or hosted features will be limited. The shared public Agmarknet key may be rate limited.
+
+Crop diagnosis tries Gemini, Groq, and Google Gemma, then the local ONNX model when no hosted provider returns a diagnosis.
+
+### 3. Start the app
+
+```powershell
 python app.py
 ```
 
-At startup, the terminal lists which integrations have keys or local files configured. This is a configuration check, not a live API test. During diagnosis, the terminal prints an ordered step-by-step trace: the Groq plant-image check and its true/false result (when configured), the provider and exact model called at each diagnosis attempt, skipped or failed providers, and the provider/model that returned the answer. API keys are not printed. Copy `.env.example` to `.env` and add your keys to enable hosted features.
+Open [http://localhost:7860](http://localhost:7860). The startup log reports which integrations are configured; it does not make live API checks.
 
-Or with Gunicorn (closer to production):
+For a production-like local run:
 
 ```bash
 gunicorn --bind 0.0.0.0:7860 --workers 1 --threads 8 --timeout 60 app:app
 ```
 
-Visit `http://localhost:7860` (or the port Flask prints in dev mode).
+The single Gunicorn worker is intentional: in-memory caches are shared among threads in a worker, but not across worker processes.
 
-### 4. Docker
+## Pages and capabilities
+
+| Page | Path | Description |
+|---|---|---|
+| Dashboard | `/` | Weather, forecast, and location-based crop guidance |
+| Crop diagnosis | `/diagnose` | Submit a crop photo for hosted or offline diagnosis |
+| Market prices | `/market` | Agmarknet mandi prices and available price history |
+| Alerts | `/alerts` | Weather alerts, forecast risks, and seasonal guidance |
+| Offline page | `/offline` | Fallback page when a page cannot be loaded |
+| Usage dashboard | `/usage` | Protected usage statistics for administrators |
+
+The interface supports English and 22 Indian languages. Translation quality can vary, so review machine-generated translations before relying on them for critical guidance.
+
+### Crop diagnosis and offline model
+
+Diagnosis tries configured hosted providers before the local ONNX model. The local model covers 15 leaf classes across tomato, potato, and bell pepper; it is not a general crop disease detector and provides no treatment advice. Confirm uncertain results with a qualified local agricultural expert.
+
+The model is downloaded and checksum-verified during the Docker build. To download it for a local setup:
+
+```bash
+python scripts/download_offline_diagnosis_model.py
+```
+
+See [THIRD_PARTY_MODEL_LICENSES.txt](./THIRD_PARTY_MODEL_LICENSES.txt) for model licensing information.
+
+### Translation data
+
+Diagnosis-page translations and the crop disease glossary are stored under `translations/`. To generate or resume diagnosis translations:
+
+```bash
+python generate_diagnose_translations.py
+```
+
+You can optionally pass language codes, such as `python generate_diagnose_translations.py mai sa`.
+
+To fill missing interface translations:
+
+```bash
+python fill_missing_translations.py
+```
+
+This helper supports optional language codes, preserves existing translations, and can be rerun to continue filling missing strings. Review generated translations with native speakers.
+
+## API overview
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/weather` | Current conditions and forecast |
+| `POST` | `/api/crop-recommendations` | Crop recommendations |
+| `GET` | `/api/vegetation` | Satellite vegetation health |
+| `POST` | `/api/alerts` | Current-condition agricultural alerts |
+| `POST` | `/api/alerts-forecast` | Alerts across a forecast |
+| `POST` | `/api/crop-risk` | Crop-specific weather risk |
+| `POST` | `/api/monthly-alerts` | Monthly risk calendar |
+| `POST` | `/api/seasonal-alerts` | Seasonal advisories |
+| `POST` | `/api/diagnose` | Diagnose an uploaded crop image |
+| `GET` | `/api/market` | Market prices by location |
+| `POST` | `/api/chat` | Kisan Helper chatbot |
+| `POST` | `/api/stt` | Transcribe chatbot voice input |
+| `GET` | `/healthz` | Liveness check |
+| `GET` | `/readyz` | Integration configuration summary |
+
+Translation and diagnosis review endpoints are also available in the route modules. Usage statistics and diagnosis review data are restricted to administrators. Debug endpoints are disabled unless `FLASK_DEBUG=1`; do not enable debug mode in production.
+
+## Tests
+
+Run the test suite from the repository root:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Docker
+
+Build and run the image from the repository root:
 
 ```bash
 docker build -t smartagro .
-docker run -p 7860:7860 --env-file .env smartagro
+docker run --rm -p 7860:7860 --env-file .env smartagro
 ```
 
----
+The container listens on port `7860`. The Docker image installs the system libraries needed by `rasterio` and downloads the offline diagnosis model during its build.
 
-## ☁️ Deployment (Hugging Face Spaces)
+## Hugging Face Spaces
 
-The `Dockerfile` is set up for Hugging Face Spaces' Docker SDK, which expects the app to listen on port `7860`. Add your API keys as **Secrets** in the Space settings (not as plain variables) — they map to the same environment variables described above.
+The Docker configuration targets Hugging Face Spaces on port `7860`. Add API keys as Space Secrets using the same names listed above. Do not put keys in source files or commit them to the repository.
 
----
+## Project structure
 
-## 🗂️ Project Structure
-
-```
-Smartagro-Main/
-├── app.py                      # All backend routes + logic (Flask)
-├── requirements.txt            # Python dependencies
-├── runtime.txt                 # Python version pin
-├── Dockerfile                  # HF Spaces / Docker deployment
-├── .env.example                # Environment variable template (copy to .env)
-├── market_history_cache.json   # Persisted market price history (auto-updated)
-├── api_usage_tracker.json      # Persisted API call counters
-├── templates/
-│   ├── index.html              # Dashboard
-│   ├── diagnose.html           # Crop disease diagnosis page
-│   ├── alerts.html             # Weather alerts (daily/monthly/seasonal)
-│   ├── market.html             # Market prices
-│   ├── usage.html              # API usage dashboard
-│   └── offline.html            # PWA offline fallback
-└── static/
-    ├── js/
-    │   ├── main.js              # Shared helpers (icons, date formatting, etc.)
-    │   ├── dashboard.js
-    │   ├── diagnose.js
-    │   ├── alerts.js
-    │   ├── market.js
-    │   ├── market_translate.js
-    │   ├── kisan-helper.js      # Chatbot frontend logic
-    │   └── translations.js      # Multilingual UI strings
-    ├── css/
-    ├── icons/
-    ├── manifest.json            # PWA manifest
-    └── service-worker.js        # PWA offline support
+```text
+app.py                              Flask application, page routes, health checks
+shared.py                           Shared configuration, translations, and utilities
+routes/
+  alerts.py                         Weather alerts and crop risk endpoints
+  chat.py                           Chatbot and speech-to-text endpoints
+  diagnose.py                       Crop diagnosis and diagnosis translations
+  market.py                         Agmarknet prices and market translations
+  weather.py                        Weather, recommendations, and vegetation
+templates/                          Server-rendered page templates
+static/                             CSS, JavaScript, icons, and PWA assets
+translations/                       Per-language diagnosis translations
+tests/                              Application, diagnosis, and translation tests
+scripts/                            Model download and maintenance scripts
+models/offline_diagnosis/            Optional local ONNX diagnosis model
 ```
 
----
+## Data and limitations
 
-## 🛣️ Key API Routes
-
-| Route | Purpose |
-|---|---|
-| `GET /api/weather` | Current conditions + merged forecast (OpenWeatherMap + Visual Crossing) |
-| `POST /api/alerts` | Today's weather-driven agricultural alerts |
-| `POST /api/alerts-forecast` | Per-day alerts across the available forecast window |
-| `POST /api/monthly-alerts` | Full-month risk calendar for the Alerts page |
-| `POST /api/seasonal-alerts` | General season-driven advisories |
-| `POST /api/diagnose` | Crop disease diagnosis from an uploaded photo |
-| `GET /api/diagnose-log` / `POST /api/diagnose-log/review` | Diagnosis QA audit trail |
-| `GET /api/market` | Live mandi prices for a state (Agmarknet) |
-| `GET /api/vegetation` | NDVI / satellite vegetation health |
-| `POST /api/chat` | Kisan Helper chatbot |
-| `POST /api/stt` | Voice message transcription for the chatbot |
-| `POST /api/crop-recommendations` | Suggested crops for the farmer's conditions |
-| `POST /api/crop-risk` | Crop-specific risk calendar |
-| `GET /api/translate-*` | Per-page translation endpoints (dashboard, market, alerts, diagnose) |
-| `GET /api/usage` | API call usage stats |
-| `GET /healthz`, `GET /readyz` | Health/readiness checks |
-
-Debug-only routes (`/api/debug-market`, `/api/debug-extended-forecast`) are gated behind `FLASK_DEBUG=1` and return `403` in production.
-
----
-
-## 🔒 Notes on Data Integrity
-
-This app deliberately avoids fabricating data it doesn't have:
-
-- Weather/forecast days beyond what a real provider returns are marked `unavailable` rather than guessed.
-- Market prices only show real, government-reported Agmarknet data — non-crop entries (livestock, poultry, ornamental flowers, timber) that appear in the raw feed are filtered out (`_NON_CROP_COMMODITY_RX` in `app.py`).
-- Seasonal advisories only assert a pest/fungal risk when real humidity data crosses a defined threshold — never as a default claim.
-
-<div align="center">
-
-Built for Indian farmers 🇮🇳 &nbsp;•&nbsp; Powered by open weather, satellite, and government data
-
-</div>
+- Weather, forecasts, and market prices depend on third-party services and their availability.
+- Missing forecast data is not a forecast and should not be treated as one.
+- Market data is sourced from Agmarknet; it can be delayed, incomplete, or rate limited.
+- Satellite imagery may be unavailable because of location, cloud cover, or provider availability.
+- The offline diagnosis model supports only its listed classes and may be inaccurate on field photos.
+- AI-generated recommendations are informational and should not replace local agronomic expertise.
