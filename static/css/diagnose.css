@@ -563,7 +563,10 @@
   .btn-capture { width: 54px; height: 54px; }
   .chem-item { flex-direction: column; align-items: flex-start; gap: 4px; }
   .tips-card { font-size: 0.82rem; }
-  .diagnose-hero { min-height: 220px; }\n.history-box {
+  .diagnose-hero { min-height: 220px; }
+}
+
+.history-box {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -626,7 +629,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 280px;
+  max-height: 180px;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -768,4 +771,30 @@
 .diag-hist-delete:hover {
   color: #f87171;
   background: rgba(248, 113, 113, 0.12);
+}
+
+@media (max-width: 600px) {
+  .diag-hist-list,
+  .diag-hist-grid {
+    max-height: 144px;
+  }
+
+  .diag-hist-card {
+    gap: 8px;
+    padding: 6px;
+  }
+
+  .diag-hist-thumb {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+  }
+
+  .diag-hist-thumb img {
+    max-width: 44px !important;
+    max-height: 44px !important;
+  }
 }
